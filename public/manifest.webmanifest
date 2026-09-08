@@ -1,0 +1,23 @@
+{
+  "name": "Website Generator",
+  "short_name": "Generator",
+  "description": "Generate, edit and deploy a business website or digital menu from your phone.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui", "browser"],
+  "orientation": "any",
+  "background_color": "#f7f7f8",
+  "theme_color": "#4338ca",
+  "categories": ["business", "productivity"],
+  "icons": [
+    { "src": "/icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "New project", "short_name": "New", "url": "/projects/new" },
+    { "name": "My projects", "short_name": "Projects", "url": "/" }
+  ]
+}

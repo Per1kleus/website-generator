@@ -1,0 +1,17 @@
+node_modules/
+.next/
+out/
+build/
+*.tsbuildinfo
+next-env.d.ts
+
+# Local runtime data (SQLite db, uploaded assets, exports)
+data/
+!data/.gitkeep
+
+.env
+.env.local
+.DS_Store
+test-results/
+playwright-report/
+qa-screenshots/
