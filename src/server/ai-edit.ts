@@ -373,6 +373,9 @@ export function validateSiteDoc(candidate: Site, previous: Site): Site {
     },
     theme: {
       colors,
+      // Web fonts are chosen by the design-intelligence stage, not by a free
+      // -form edit; carrying them through keeps typography stable.
+      fontFamilies: previous.theme.fontFamilies,
       fonts: {
         heading: FONTS.includes(candidate.theme?.fonts?.heading)
           ? candidate.theme.fonts.heading

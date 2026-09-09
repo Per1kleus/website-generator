@@ -1,4 +1,5 @@
 import { architecture, RHYTHM_SPACING, type DesignArchitecture } from "./architectures";
+import { readableOn } from "./contrast";
 import { localeInfo, type Locale } from "./locales";
 import { fontStack, key, t, type Section, type Site } from "./site";
 
@@ -48,7 +49,40 @@ function imageUrl(id: string, opts: RenderOptions): string | null {
   return (opts.assetUrl ? opts.assetUrl(id) : `/api/assets/${id}`) || null;
 }
 
+
+/**
+ * Web font loading, kept to the minimum that is defensible on mobile data:
+ * preconnect to both Google hosts, one stylesheet, and `display=swap` so text
+ * paints immediately in the fallback stack rather than staying invisible.
+ * A digital menu never reaches here — its fontFamilies is null by design.
+ */
+function fontLinks(site: Site): string {
+  const url = site.theme.fontFamilies?.url?.trim();
+  if (!url) return "";
+  if (!/^https:\/\/fonts\.googleapis\.com\//.test(url)) return "";
+  const withSwap = url.includes("display=") ? url : `${url}${url.includes("?") ? "&" : "?"}display=swap`;
+  return `<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="${esc(withSwap)}" media="print" onload="this.media='all'">
+<noscript><link rel="stylesheet" href="${esc(withSwap)}"></noscript>`;
+}
+
 /* ------------------------------------------------------------------ CSS -- */
+
+/**
+ * Font stack for a role. When the design-intelligence stage picked a web font
+ * pairing, that family leads and the local stack stays behind it as the
+ * fallback — so the page is readable before the font arrives, and stays
+ * readable if it never does.
+ */
+function stackFor(site: Site, role: "heading" | "body"): string {
+  const local = fontStack(site.theme.fonts[role]);
+  const family = site.theme.fontFamilies?.[role]?.trim();
+  if (!family) return local;
+  // Quote families containing spaces, as CSS requires.
+  const quoted = /^[A-Za-z0-9-]+$/.test(family) ? family : `"${family.replace(/"/g, "")}"`;
+  return `${quoted}, ${local}`;
+}
 
 function styles(site: Site, a: DesignArchitecture, dir: "ltr" | "rtl"): string {
   const c = site.theme.colors;
@@ -85,7 +119,10 @@ function styles(site: Site, a: DesignArchitecture, dir: "ltr" | "rtl"): string {
   --accent:${esc(c.accent)};
   --bg:${esc(c.bg)};
   --text:${esc(c.text)};
-  --on-primary:${esc(c.bg)};
+  /* Not simply the page background: a dark palette's primary can sit close to
+     its background, which would make a solid button's label invisible. */
+  --on-primary:${esc(readableOn(c.primary))};
+  --on-accent:${esc(readableOn(c.accent))};
   --muted:color-mix(in srgb, ${esc(c.text)} 62%, ${esc(c.bg)});
   --line:color-mix(in srgb, ${esc(c.text)} ${a.ruleWeight > 1 ? 40 : 16}%, ${esc(c.bg)});
   --card:color-mix(in srgb, ${esc(c.bg)} 94%, ${esc(c.text)});
@@ -104,12 +141,12 @@ function styles(site: Site, a: DesignArchitecture, dir: "ltr" | "rtl"): string {
 html{-webkit-text-size-adjust:100%;text-size-adjust:100%;scroll-behavior:smooth}
 body{
   margin:0;background:var(--bg);color:var(--text);
-  font-family:${fontStack(site.theme.fonts.body)};
+  font-family:${stackFor(site, "body")};
   font-size:clamp(1rem,.96rem + .2vw,1.125rem);
   line-height:1.6;overflow-x:hidden;
 }
 h1,h2,h3{
-  font-family:${fontStack(site.theme.fonts.heading)};
+  font-family:${stackFor(site, "heading")};
   line-height:1.1;margin:0 0 .5em;text-wrap:balance;
   letter-spacing:${a.headingTracking};
   ${a.headingCase === "upper" ? "text-transform:uppercase;" : ""}
@@ -166,7 +203,7 @@ ${a.headingOrnament === "rule"
 .site-header .bar{display:flex;align-items:center;gap:1rem;min-height:3.5rem}
 .brand{
   display:inline-flex;align-items:center;gap:.6rem;
-  font-family:${fontStack(site.theme.fonts.heading)};
+  font-family:${stackFor(site, "heading")};
   font-weight:750;font-size:1.0625rem;text-decoration:none;color:var(--text);
   ${a.headingCase === "upper" ? "text-transform:uppercase;letter-spacing:.12em;font-size:.9375rem;" : ""}
 }
@@ -330,7 +367,7 @@ blockquote{margin:0;font-size:1.0625rem}
 .cta-band{background:var(--primary);color:var(--on-primary)}
 .cta-band h2,.cta-band p{color:var(--on-primary)}
 .cta-band h2::before{background:var(--on-primary)!important;color:var(--on-primary)!important}
-.cta-band .btn{background:var(--bg);color:var(--primary);border-color:var(--bg)}
+.cta-band .btn{background:var(--on-primary);color:var(--primary);border-color:var(--on-primary)}
 .contact-list{list-style:none;margin:0;padding:0}
 .contact-list a{display:flex;align-items:center;gap:.75rem;min-height:3.25rem;
   text-decoration:none;color:var(--text);border-bottom:var(--rule) solid var(--line)}
@@ -634,6 +671,7 @@ ${languageSwitcher(site, locale, opts, "inline")}
 ${description ? `<meta name="description" content="${esc(description)}">` : ""}
 ${seo?.keywords?.length ? `<meta name="keywords" content="${esc(seo.keywords.join(", "))}">` : ""}
 <meta name="theme-color" content="${esc(site.theme.colors.primary)}">
+${fontLinks(site)}
 <meta name="robots" content="index, follow">
 ${opts.canonical ? `<link rel="canonical" href="${esc(opts.canonical)}">` : ""}
 ${alternates}

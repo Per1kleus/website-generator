@@ -2,7 +2,7 @@ import "server-only";
 import { architecture } from "@/lib/architectures";
 import { isSupportedLocale, localeInfo } from "@/lib/locales";
 import { key, missingKeys, t, type Site } from "@/lib/site";
-import { contrastRatio } from "./identity";
+import { contrastRatio, readableOn } from "@/lib/contrast";
 import type { BusinessProfile } from "./research";
 
 /**
@@ -125,6 +125,15 @@ export function validateSite(site: Site, profile?: BusinessProfile): Finding[] {
   const buttonContrast = contrastRatio(primary, bg);
   if (buttonContrast < 3) {
     push("error", "accessibility", `Buttons are ${buttonContrast.toFixed(1)}:1 against the background — they will be hard to see.`);
+  }
+  // The label sits on the button, not on the page, so it needs its own check.
+  const labelContrast = contrastRatio(readableOn(primary), primary);
+  if (labelContrast < 4.5) {
+    push(
+      "error",
+      "accessibility",
+      `Button text is only ${labelContrast.toFixed(1)}:1 against the button colour.`,
+    );
   }
 
   /* ------------------------------- language ----------------------------- */

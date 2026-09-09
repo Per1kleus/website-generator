@@ -5,9 +5,11 @@ build/
 *.tsbuildinfo
 next-env.d.ts
 
-# Local runtime data (SQLite db, uploaded assets, exports)
-data/
-!data/.gitkeep
+# Local runtime data (SQLite db, uploaded assets, exports).
+# Anchored to the repo root: an unanchored `data/` also matches
+# vendor/ui-ux-pro-max/data/, which would silently drop the design catalogue.
+/data/
+!/data/.gitkeep
 
 .env
 .env.local
@@ -15,3 +17,7 @@ data/
 test-results/
 playwright-report/
 qa-screenshots/
+
+# Python bytecode from the vendored skill
+__pycache__/
+*.pyc

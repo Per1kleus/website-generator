@@ -60,7 +60,13 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   // Only the theme moves. Sections and every locale's catalog are untouched.
   const next = {
     ...project.site,
-    theme: themeFromIdentity(identity, project.site.meta.kind),
+    // Only the theme moves, and the skill's font pairing is preserved:
+    // answering a question about mood should not silently drop typography.
+    theme: themeFromIdentity(
+      identity,
+      project.site.meta.kind,
+      project.site.theme.fontFamilies,
+    ),
   };
 
   updateProjectSite(id, user.id, next);

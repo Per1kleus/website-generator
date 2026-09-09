@@ -86,12 +86,21 @@ const TRUTH_RULES = `Truth rules — these override every other instruction:
 - If a section has no verified substance behind it, omit that section entirely rather than padding it.
 - Opening hours: only include the hours section if hours were researched. Do not guess plausible hours.`;
 
-function sectionPlanFor(kind: SiteKind, identity: VisualIdentity, profile: BusinessProfile): string[] {
+function sectionPlanFor(
+  kind: SiteKind,
+  identity: VisualIdentity,
+  profile: BusinessProfile,
+  skillPlan: string[] = [],
+): string[] {
   const allowed = new Set([
     "hero", "about", "services", "menu", "gallery", "hours",
     "testimonials", "cta", "contact", "footer",
   ]);
-  const planned = identity.sectionPlan.filter((s) => allowed.has(s));
+  // Prefer the hosted analysis's plan; fall back to the skill's landing
+  // pattern, which is real catalogue knowledge rather than a default.
+  const planned = (identity.sectionPlan.length ? identity.sectionPlan : skillPlan).filter((s) =>
+    allowed.has(s),
+  );
   if (planned.length >= 3) {
     // The plan is authoritative, but hero/contact/footer are structural.
     const out = planned.filter((s) => s !== "footer");
@@ -186,8 +195,9 @@ export async function generateContent(args: {
   kind: SiteKind;
   locale: Locale;
   answers: Record<string, string>;
+  skillSectionPlan?: string[];
 }): Promise<{ content: GeneratedContent; plan: string[] }> {
-  const plan = sectionPlanFor(args.kind, args.identity, args.profile);
+  const plan = sectionPlanFor(args.kind, args.identity, args.profile, args.skillSectionPlan ?? []);
   if (!hasApiKey()) {
     return { content: templateContent(args, plan), plan };
   }

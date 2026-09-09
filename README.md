@@ -21,10 +21,29 @@ npm start          # http://localhost:3000
 
 Development: `npm run dev`.
 
+### First launch
+
+```bash
+npm run setup
+```
+
+`npm install` runs this automatically. It checks two optional things and never
+fails the install:
+
+- **the design catalogue** — vendored, needs only Python 3
+- **Ollama** — if the daemon is running, the smallest capable model
+  (`qwen2.5:0.5b`, ~400MB) is downloaded once
+
+Neither is required. The server repeats the same check on first launch and
+starts the download in the background, so a phone user is never waiting on it.
+
 ### Optional configuration
 
 | Variable | Effect |
 | --- | --- |
+| `OLLAMA_HOST` | Where the Ollama daemon lives. Default `http://127.0.0.1:11434`. |
+| `WG_OLLAMA_MODEL` | Which local model writes design queries. Default `qwen2.5:0.5b`. |
+| `WG_OLLAMA_AUTOPULL` | Set to `0` to never download a model automatically. |
 | `ANTHROPIC_API_KEY` | Enables business research (web search), visual identity analysis, content generation, translation and free-form AI editing. Without it the app still works end to end from the creator's own input, using a template generator and a rule-based editor. |
 | `WG_DATA_DIR` | Where the SQLite database, uploads and published sites live. Defaults to `./data`. |
 | `VERCEL_TOKEN` | Enables the Vercel deploy target. |
@@ -45,6 +64,7 @@ src/
     render.ts         Site + locale -> one standalone HTML document
     migrate.ts        v1 -> v2 document upgrade, applied on read
     styles.ts         contrast-checked palettes and creator style presets
+    contrast.ts       WCAG maths and palette repair, shared by lib and server
     maps.ts           Google Maps share-link parsing
   server/
     db.ts             SQLite schema, lazy connection, additive migrations
@@ -57,6 +77,8 @@ src/
     generator.ts      the pipeline that runs those stages in order
     validate.ts       content, design, language, technical, a11y findings
     bundle.ts         the static file set: one document per language
+    uiux.ts           design-catalogue bridge: query building and mapping
+    ollama.ts         local model: detection, background install, JSON client
     ai-edit.ts        AI editing, locale-scoped, with structural guarantees
     deploy.ts         built-in publishing, plus Vercel / Netlify
     svg.ts            SVG logo sanitiser
@@ -149,15 +171,80 @@ worse than a simpler one. No key means the template generator writes the site
 from the owner's own inputs, and the AI editor still handles colours, style,
 layout and section changes deterministically. Nothing silently pretends.
 
-### Where the UI/UX layer lives
+## The design engine
 
-There is no "UI/UX Pro Max" skill installed in this environment, so its intent
-is written down instead of assumed: the copy rules, hierarchy rules and touch
-rules are codified in `server/content.ts` (`UX_RULES`) and applied on every
-generation, and the compositional half lives in `lib/architectures.ts`. Both
-are checked by the QA harness rather than left as aspiration. If you have that
-skill available, point it at those two files — they are the seam it should
-replace.
+Three independent layers. The app reports which are actually running and works
+with any subset.
+
+### 1. The design catalogue — always on
+
+[ui-ux-pro-max](https://github.com/nextlevelbuilder/ui-ux-pro-max-skill) is
+vendored into `vendor/ui-ux-pro-max/` (MIT, see its `PROVENANCE.md`): 79 UI
+styles, colour systems, font pairings, landing-page patterns, UX guidelines and
+reasoning rules. It is committed rather than fetched so generation works
+offline and the same business produces the same design twice.
+
+`server/uiux.ts` queries it and maps the answer onto the site: palette,
+Google-font pairing, landing pattern → section order, and the visual style →
+one of this app's composition architectures.
+
+### 2. The local model — optional, via Ollama
+
+The catalogue is keyword-matched, so **the query is most of the quality**. The
+same café asked badly:
+
+    "greek coffee shop digital menu"  →  Digital Signage / Kiosk
+                                         dark crypto palette, Orbitron
+
+and asked well:
+
+    "warm artisanal cafe"             →  Bakery / Cafe
+                                         warm amber palette, Playfair Display
+
+Turning business facts into the second query is a small, bounded, structured
+task — which is exactly why the *smallest* capable model is the right choice
+rather than a large one. `qwen2.5:0.5b` runs it in JSON mode at temperature 0,
+so the same business always yields the same design.
+
+Its output is validated hard: the query is stripped to 2–5 design words, the
+business name and town are removed (they poison a keyword match), motion is
+capped for menus, and anything unusable falls back to a built-in rule set that
+maps ~15 business categories and ~8 moods. **A bad query is worse than the
+deterministic one.**
+
+### 3. The hosted model — optional, via API key
+
+Research, visual identity analysis, copy and translation. When present it sees
+the logo and the research and gets the final say on the palette; the
+catalogue's recommendation is passed to it as a strong, explicit prior it must
+justify departing from.
+
+### What each tier buys you
+
+| Running | Design comes from |
+| --- | --- |
+| Nothing | A creator-chosen preset |
+| Catalogue | Real style/palette/typography for the business category |
+| Catalogue + Ollama | The above, with a far better-matched category |
+| All three | The above, reconciled against the actual business and its logo |
+
+### Contrast is guaranteed, not assumed
+
+A palette can arrive from a hosted model, the catalogue, or a colour picker,
+and none can be trusted. `lib/contrast.ts` repairs every palette at the point
+of use: body text to 7:1, primary to 4.5:1, accent to 3:1, and a button's label
+is computed against *the button*, not the page. Where a dark catalogue row puts
+its real call-to-action in `accent`, the two are swapped rather than
+desaturating a primary that was never meant to be a button.
+
+### Refreshing the catalogue
+
+```bash
+npm run refresh:skill && npm run test:mobile
+```
+
+A catalogue change can legitimately move the recommended palette or typography,
+so the suites are re-run afterwards.
 
 ## Multi-language
 
@@ -226,7 +313,8 @@ layouts:
 
 ```bash
 npm start &
-npm run test:mobile
+npm run test:mobile     # 207 checks: the whole product on a phone
+npm run test:design     # 21 checks: the design engine across all its tiers
 ```
 
 The harness drives the entire workflow on a 390×844 touch viewport — including
@@ -251,4 +339,21 @@ Beyond layout it asserts the properties the requirements actually turn on:
 - every generated site has a footer
 - the deployed site really serves `/el/` and `/en/`, with a sitemap listing both
 
-It fails the run on any console error. Screenshots land in `qa-screenshots/`.
+It fails the run on any same-origin console error. Screenshots land in
+`qa-screenshots/`.
+
+`test:design` covers the design engine across all four states, using a stub
+Ollama daemon so no real one is needed:
+
+- catalogue only — a site is still generated, with a catalogue palette and font
+  pairing rather than the generic preset
+- Ollama present but the model missing — first launch detects it and installs
+  in the background, with progress
+- Ollama + model — the local model writes the query, and two different
+  businesses come out genuinely different
+- Ollama disappears — generation still succeeds and the status stops claiming
+  it is there
+
+It also asserts the properties that keep web fonts from becoming load-bearing:
+`display=swap`, a local fallback stack behind every web family, and no font
+requests at all from a digital menu.

@@ -9,7 +9,11 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
-    "test:mobile": "node scripts/mobile-qa.mjs"
+    "test:mobile": "node scripts/mobile-qa.mjs",
+    "setup": "node scripts/setup.mjs",
+    "refresh:skill": "node scripts/refresh-uiux-skill.mjs",
+    "postinstall": "node scripts/setup.mjs || true",
+    "test:design": "node scripts/design-engine-qa.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.124.0",

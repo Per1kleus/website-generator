@@ -219,6 +219,8 @@ export function migrateToV2(doc: unknown, defaultLocale = "en"): Site {
         heading: str(oldFonts.heading) || arch.fonts.heading,
         body: str(oldFonts.body) || arch.fonts.body,
       },
+      // v1 predates web fonts entirely.
+      fontFamilies: null,
       layout: (["minimal", "balanced", "dense"] as const).includes(oldTheme.layout as never)
         ? (oldTheme.layout as Site["theme"]["layout"])
         : "balanced",

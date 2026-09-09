@@ -5,9 +5,11 @@ import path from "node:path";
 import { z } from "zod";
 import { ARCHITECTURE_IDS, architecture } from "@/lib/architectures";
 import { PALETTES } from "@/lib/styles";
+import { contrastRatio, repairPalette } from "@/lib/contrast";
 import type { SiteKind, Theme } from "@/lib/site";
 import { UPLOAD_DIR } from "./db";
 import { hasApiKey, type BusinessProfile } from "./research";
+import type { SkillDesign } from "./uiux";
 
 const MODEL = "claude-opus-5";
 
@@ -128,8 +130,17 @@ export async function analyseIdentity(args: {
   logoAssetId: string | null;
   /** Style words the creator typed, if any. */
   designNotes: string;
+  /** What the ui-ux-pro-max catalogue recommended, if it ran. */
+  skill?: SkillDesign | null;
 }): Promise<VisualIdentity> {
-  if (!hasApiKey()) return fallbackIdentity(args.kind, args.stylePreset, args.profile);
+  // With no hosted model the skill's recommendation IS the design decision —
+  // which is the whole point of wiring it in: the no-key path stops falling
+  // back to a generic preset.
+  if (!hasApiKey()) {
+    return args.skill
+      ? identityFromSkill(args.skill, args.profile)
+      : fallbackIdentity(args.kind, args.stylePreset, args.profile);
+  }
 
   try {
     const client = new Anthropic();
@@ -156,6 +167,16 @@ export async function analyseIdentity(args: {
         ? `This is a QR-code digital menu read on a phone at a table. menu-first is almost always correct here.`
         : "",
       logo ? `A logo is attached. Let it inform the palette and personality, but do not let it override the physical identity of the place.` : "No logo was provided.",
+      args.skill
+        ? `\nA design catalogue (ui-ux-pro-max) was consulted for this business type and recommends:
+  Category: ${args.skill.rationale}
+  Style: ${args.skill.styleName}
+  Landing pattern: ${args.skill.patternName} -> sections ${args.skill.sectionPlan.join(" > ")}
+  Palette: primary ${args.skill.theme.colors.primary}, accent ${args.skill.theme.colors.accent}, background ${args.skill.theme.colors.bg}, text ${args.skill.theme.colors.text}
+  Architecture: ${args.skill.theme.architecture}
+  Anti-patterns to avoid: ${args.skill.antiPatterns || "none listed"}
+This is a well-grounded prior. Depart from it only where the actual business gives you a concrete reason, and say why in architectureRationale.`
+        : "",
     ]
       .filter(Boolean)
       .join("\n");
@@ -224,14 +245,9 @@ export function sanitiseIdentity(
     text: colour(raw.palette?.text, fallback.palette.text),
   };
 
-  // Enforce the contrast promise rather than trusting it. If the model's own
-  // palette fails, repair the offending pair instead of discarding the work.
-  if (contrastRatio(palette.text, palette.bg) < 7) {
-    palette.text = pickReadable(palette.bg, palette.text);
-  }
-  if (contrastRatio(palette.primary, palette.bg) < 4.5) {
-    palette.primary = darkenUntil(palette.primary, palette.bg, 4.5);
-  }
+  // Enforce the contrast promise rather than trusting it: repair the offending
+  // pair instead of discarding the model's work.
+  const repaired = repairPalette(palette);
 
   const FONTS = ["system", "serif", "grotesk", "rounded", "mono", "display", "slab", "humanist"];
   const arch = architecture(archId);
@@ -239,7 +255,7 @@ export function sanitiseIdentity(
   return {
     ...raw,
     architecture: archId,
-    palette,
+    palette: repaired,
     fonts: {
       heading: FONTS.includes(raw.fonts?.heading) ? raw.fonts.heading : arch.fonts.heading,
       body: FONTS.includes(raw.fonts?.body) ? raw.fonts.body : arch.fonts.body,
@@ -255,64 +271,48 @@ export function sanitiseIdentity(
   };
 }
 
-export function themeFromIdentity(identity: VisualIdentity, kind: SiteKind): Theme {
+/**
+ * Turns the skill's catalogue recommendation into an identity directly, for
+ * the path where no hosted model is available.
+ */
+function identityFromSkill(skill: SkillDesign, profile: BusinessProfile): VisualIdentity {
+  return {
+    dominantColors: [skill.theme.colors.primary, skill.theme.colors.accent],
+    secondaryColors: [skill.theme.colors.secondary],
+    materials: [],
+    interiorStyle: "",
+    lighting: "",
+    typographyPersonality: skill.theme.fontFamilies
+      ? `${skill.theme.fontFamilies.heading} / ${skill.theme.fontFamilies.body}`
+      : "",
+    brandPersonality: [],
+    photographyStyle: "",
+    atmosphere: profile.atmosphere,
+    architecture: skill.theme.architecture,
+    architectureRationale: `Chosen from the design catalogue: ${skill.rationale}.`,
+    palette: { ...skill.theme.colors },
+    fonts: { ...skill.theme.fonts },
+    sectionPlan: skill.sectionPlan,
+    questions: [],
+    confidence: "medium",
+  };
+}
+
+export function themeFromIdentity(
+  identity: VisualIdentity,
+  kind: SiteKind,
+  fontFamilies: Theme["fontFamilies"] = null,
+): Theme {
   const arch = architecture(identity.architecture);
   return {
     colors: { ...identity.palette },
     fonts: { ...identity.fonts },
+    fontFamilies,
     layout: kind === "menu" ? "dense" : arch.rhythm === "airy" ? "minimal" : arch.rhythm === "tight" ? "dense" : "balanced",
     radius: arch.radius,
     architecture: identity.architecture,
   };
 }
 
-/* ------------------------------- colour maths ---------------------------- */
-
-function srgbToLinear(v: number): number {
-  const c = v / 255;
-  return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
-}
-
-export function relativeLuminance(hex: string): number {
-  const m = hex.replace("#", "");
-  const r = parseInt(m.slice(0, 2), 16);
-  const g = parseInt(m.slice(2, 4), 16);
-  const b = parseInt(m.slice(4, 6), 16);
-  return 0.2126 * srgbToLinear(r) + 0.7152 * srgbToLinear(g) + 0.0722 * srgbToLinear(b);
-}
-
-export function contrastRatio(a: string, b: string): number {
-  if (!HEX.test(a) || !HEX.test(b)) return 0;
-  const la = relativeLuminance(a);
-  const lb = relativeLuminance(b);
-  const [hi, lo] = la > lb ? [la, lb] : [lb, la];
-  return (hi + 0.05) / (lo + 0.05);
-}
-
-/** Keeps the hue, pushes lightness until the pair is comfortably readable. */
-function pickReadable(bg: string, preferred: string): string {
-  const bgLum = relativeLuminance(bg);
-  const target = bgLum > 0.4 ? "#14141a" : "#f7f7f8";
-  return contrastRatio(preferred, bg) >= 7 ? preferred : target;
-}
-
-function darkenUntil(colour: string, bg: string, ratio: number): string {
-  const m = colour.replace("#", "");
-  let r = parseInt(m.slice(0, 2), 16);
-  let g = parseInt(m.slice(2, 4), 16);
-  let b = parseInt(m.slice(4, 6), 16);
-  const towardsDark = relativeLuminance(bg) > 0.4;
-
-  for (let i = 0; i < 24; i++) {
-    const hex = `#${[r, g, b].map((v) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, "0")).join("")}`;
-    if (contrastRatio(hex, bg) >= ratio) return hex;
-    if (towardsDark) {
-      r *= 0.88; g *= 0.88; b *= 0.88;
-    } else {
-      r = r + (255 - r) * 0.12;
-      g = g + (255 - g) * 0.12;
-      b = b + (255 - b) * 0.12;
-    }
-  }
-  return towardsDark ? "#1a1a22" : "#f2f2f5";
-}
+/* Colour maths lives in lib/contrast.ts so the renderer can use it too. */
+export { contrastRatio, relativeLuminance } from "@/lib/contrast";

@@ -5,6 +5,7 @@ import { listProjects } from "@/server/projects";
 import { AppShell } from "@/components/AppShell";
 import { AppBar, Card } from "@/components/ui";
 import { AccountActions } from "@/components/AccountActions";
+import { DesignEngineCard } from "@/components/DesignEngineCard";
 
 export const metadata: Metadata = { title: "Profile" };
 
@@ -44,6 +45,8 @@ export default async function AccountPage() {
           <p className="text-xs text-muted">Websites ready</p>
         </Card>
       </div>
+
+      <DesignEngineCard />
 
       <AccountActions />
 

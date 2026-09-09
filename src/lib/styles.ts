@@ -77,6 +77,8 @@ export function themeFor(style: string, kind: SiteKind): Theme {
   return {
     colors: { ...PALETTES[preset.palette] },
     fonts: { ...arch.fonts },
+    // A creator preset uses local stacks; the skill supplies web fonts.
+    fontFamilies: null,
     layout: kind === "menu" ? "dense" : preset.layout,
     radius: arch.radius,
     architecture: archId,

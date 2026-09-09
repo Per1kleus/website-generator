@@ -7,6 +7,8 @@ import { assembleSite, generateContent } from "./content";
 import { analyseIdentity, themeFromIdentity, type VisualIdentity } from "./identity";
 import { emptyProfile, hasApiKey, researchBusiness, type BusinessProfile } from "./research";
 import { addLocale, ensureSeo } from "./translate";
+import { analyseWithSkill, type SkillDesign } from "./uiux";
+import { ensureFirstLaunch, getState } from "./ollama";
 
 export { hasApiKey };
 
@@ -44,6 +46,8 @@ export type GenerationArtifacts = {
   profile: BusinessProfile;
   identity: VisualIdentity;
   usedAi: boolean;
+  /** What the ui-ux-pro-max skill recommended, for the creator to see. */
+  skill: SkillDesign | null;
 };
 
 export type StageReporter = (stage: string, message: string) => void;
@@ -54,6 +58,11 @@ export async function runGeneration(
 ): Promise<GenerationArtifacts> {
   const usedAi = hasApiKey();
   const maps = parseMapsUrl(input.mapsUrl);
+
+  // Idempotent: probes for Ollama once per process and starts the model
+  // download in the background if it is missing. Never awaited for longer
+  // than the probe, so a first generation is not held up by a download.
+  void ensureFirstLaunch();
 
   /* 1. Research ---------------------------------------------------------- */
   report("research", usedAi ? "Researching the business" : "Reading your details");
@@ -77,7 +86,29 @@ export async function runGeneration(
   if (input.phone) profile.phone = input.phone;
   if (input.email) profile.email = input.email;
 
-  /* 2. Identity + 3. Architecture ---------------------------------------- */
+  /* 2. Design intelligence ------------------------------------------------
+     The ui-ux-pro-max skill supplies the catalogue knowledge — style, colour
+     system, font pairing, landing pattern, section order. The local model's
+     only job is to ask it a good question, which is where most of the quality
+     comes from: the same business asked badly returns a crypto/kiosk system,
+     asked well returns the right warm bakery one. */
+  report("analysis", "Consulting the design catalogue");
+  const skill = await analyseWithSkill({
+    profile,
+    businessName: input.businessName,
+    businessType: input.businessType,
+    description: input.description,
+    kind: input.siteKind,
+    designNotes: input.designNotes,
+  });
+  if (skill) {
+    report(
+      "analysis",
+      `${skill.rationale}${skill.query.source === "local-model" ? " (local model)" : ""}`,
+    );
+  }
+
+  /* 3. Identity + architecture ------------------------------------------- */
   report("analysis", "Analysing the visual identity");
   const identity = await analyseIdentity({
     profile,
@@ -88,18 +119,33 @@ export async function runGeneration(
     stylePreset: input.style,
     logoAssetId: input.logoAssetId,
     designNotes: input.designNotes,
+    // The skill's recommendation is a strong prior, not a veto: a hosted model
+    // that can actually see the logo and read the research may still know
+    // better about this specific business.
+    skill,
   });
 
   report("architecture", `Design direction: ${identity.architecture}`);
+
+  /* The theme is layered, best source first:
+       hosted identity analysis  (sees the logo and the research)
+       > the skill's catalogue   (real design knowledge, no key needed)
+       > the creator's preset    (last resort)
+     Web fonts only ever come from the skill, so they survive either way. */
   const theme = usedAi
-    ? themeFromIdentity(identity, input.siteKind)
-    : themeFor(input.style, input.siteKind);
+    ? themeFromIdentity(identity, input.siteKind, skill?.theme.fontFamilies ?? null)
+    : skill
+      ? skill.theme
+      : themeFor(input.style, input.siteKind);
 
   /* 4. Content ----------------------------------------------------------- */
   report("content", "Writing the content");
   const { content } = await generateContent({
     profile,
     identity,
+    // The skill's landing pattern decides section order when the hosted
+    // analysis did not produce a plan of its own.
+    skillSectionPlan: skill?.sectionPlan ?? [],
     businessName: input.businessName,
     businessType: input.businessType,
     description: input.description,
@@ -141,5 +187,5 @@ export async function runGeneration(
   site = ensureSeo(site);
 
   report("build", "Building the website");
-  return { site, profile, identity, usedAi };
+  return { site, profile, identity, usedAi, skill };
 }

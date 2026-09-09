@@ -112,7 +112,7 @@ export function startGeneration(projectId: string, input: GenerationInput): Job 
 
 async function run(jobId: string, projectId: string, input: GenerationInput) {
   try {
-    const { site, profile, identity, usedAi } = await runGeneration(input, (stage, message) => {
+    const { site, profile, identity, usedAi, skill } = await runGeneration(input, (stage, message) => {
       reportStage(jobId, stage, message);
     });
 
@@ -129,7 +129,9 @@ async function run(jobId: string, projectId: string, input: GenerationInput) {
     ).run(
       JSON.stringify(site),
       JSON.stringify(profile),
-      JSON.stringify(identity),
+      // The skill's recommendation is stored alongside the identity so the
+      // project screen can show why the design looks the way it does.
+      JSON.stringify({ ...identity, skill }),
       site.meta.defaultLocale,
       JSON.stringify(site.meta.locales),
       now,

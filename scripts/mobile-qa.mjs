@@ -618,6 +618,18 @@ async function main() {
     ["account", `${BASE}/account`],
   ];
 
+  await page.goto(`${BASE}/account`, { waitUntil: "networkidle" });
+  record(
+    "the profile screen reports which design engine is running",
+    await page.getByText("Design engine").isVisible(),
+  );
+  record(
+    "the design catalogue is reported as active",
+    await page.getByText("ui-ux-pro-max", { exact: false }).isVisible(),
+  );
+  await checkTouchTargets(page, "account");
+  await page.screenshot({ path: `${SHOTS}/23-design-engine.png` });
+
   for (const width of WIDTHS) {
     await page.setViewportSize({ width, height: width < 768 ? 844 : 900 });
     for (const [name, url] of screens) {
@@ -638,10 +650,40 @@ async function main() {
   await page.screenshot({ path: `${SHOTS}/21-landscape.png` });
 
   /* 16. Console hygiene --------------------------------------------------- */
+  // Only our own origin counts. A generated site loads its recommended web
+  // font from Google; that host is unreachable in a sandbox, and the design
+  // deliberately survives it via the local fallback stack (asserted below).
   const realErrors = consoleErrors.filter(
-    (e) => !/favicon|manifest|Failed to load resource: the server responded with a status of 40/i.test(e),
+    (e) =>
+      !/favicon|manifest|Failed to load resource: the server responded with a status of 40/i.test(e) &&
+      !/fonts\.googleapis\.com|fonts\.gstatic\.com|ERR_CONNECTION_RESET|ERR_NAME_NOT_RESOLVED/i.test(e),
   );
   record("no console errors during the workflow", realErrors.length === 0, realErrors.slice(0, 3).join(" | "));
+
+  /* 17. Web fonts must never be load-bearing ------------------------------ */
+  // The design catalogue recommends a Google font pairing. If it cannot load
+  // — offline, blocked, slow — the page must still render readable text in the
+  // local fallback stack, and must never have hidden text waiting for it.
+  const fontCss = (secondDoc.match(/<style>([\s\S]*?)<\/style>/) ?? [])[1] ?? "";
+  const bodyFont = (fontCss.match(/body\{[^}]*font-family:([^;]+)/) ?? [])[1] ?? "";
+  record(
+    "the web font is followed by a local fallback stack",
+    /system-ui|sans-serif|serif|monospace/.test(bodyFont),
+    bodyFont.trim().slice(0, 80),
+  );
+  record(
+    "web fonts are requested with display=swap so text never waits",
+    !secondDoc.includes("fonts.googleapis.com") || secondDoc.includes("display=swap"),
+  );
+
+  await page.goto(`${secondUrl}/preview`, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(1500);
+  const visibleText = await page.frameLocator("iframe").locator("h1").first().innerText();
+  record(
+    "headline text renders even though the web font is unreachable",
+    visibleText.trim().length > 0,
+    visibleText.trim().slice(0, 40),
+  );
 
   await browser.close();
 

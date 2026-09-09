@@ -34,7 +34,14 @@ export type LayoutDensity = "minimal" | "balanced" | "dense";
 
 export type Theme = {
   colors: { primary: string; secondary: string; accent: string; bg: string; text: string };
+  /** Local stacks, always present — they are the fallback for `fontFamilies`. */
   fonts: { heading: string; body: string };
+  /**
+   * Web font pairing recommended by the ui-ux-pro-max skill, when one applies.
+   * Null means "use the local stacks only", which is always the case for a
+   * digital menu: a guest must not wait on a font download to read a price.
+   */
+  fontFamilies: { heading: string; body: string; url: string } | null;
   layout: LayoutDensity;
   radius: number;
   /** Chosen design architecture — see lib/architectures.ts. */
