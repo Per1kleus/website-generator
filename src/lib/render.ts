@@ -347,6 +347,22 @@ ${a.motion === "expressive" ? `.thumbs figure:hover img{transform:scale(1.04)}` 
 .menu-item .name{font-weight:650}
 .menu-item .desc{color:var(--muted);font-size:.9375rem;margin:.2rem 0 0;max-width:none}
 .menu-item .price{font-weight:700;white-space:nowrap;font-variant-numeric:tabular-nums}
+.menu-item .menu-body{min-width:0;flex:1}
+/* A thumbnail keeps its aspect ratio via object-fit; the box never distorts
+   the photo, and a missing image simply leaves the row text-only. */
+.menu-item.has-image{align-items:center}
+.menu-thumb{
+  flex:0 0 auto;width:4.5rem;height:4.5rem;overflow:hidden;
+  border-radius:${Math.min(radius, 12)}px;background:var(--card);
+}
+.menu-thumb img{width:100%;height:100%;object-fit:cover;display:block}
+@media (min-width:40rem){ .menu-thumb{width:5.5rem;height:5.5rem} }
+.chefs{
+  display:inline-block;margin-inline-start:.4rem;padding:.1rem .5rem;
+  font-size:.6875rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+  border-radius:999px;background:var(--accent);color:var(--on-accent);
+  vertical-align:middle;white-space:nowrap;
+}
 .menu-jump{display:flex;gap:.5rem;overflow-x:auto;padding:.75rem 0;
   scroll-snap-type:x proximity;scrollbar-width:none}
 .menu-jump::-webkit-scrollbar{display:none}
@@ -417,6 +433,7 @@ function renderSection(s: Section, site: Site, locale: Locale, opts: RenderOptio
   const id = esc(s.id);
   const str = (field: string) => t(site, locale, key.section(s.id, field));
   const row = (rowId: string, field: string) => t(site, locale, key.row(s.id, rowId, field));
+  const chefsLabel = t(site, locale, key.meta("chefsChoiceLabel")) || "Chef's choice";
 
   switch (s.type) {
     case "hero": {
@@ -471,8 +488,17 @@ ${s.categories.map((c) => `<div class="menu-cat"><h3 id="${esc(c.id)}">${esc(row
   c.items.map((it) => {
     const name = t(site, locale, key.menuItem(s.id, c.id, it.id, "name"));
     const desc = t(site, locale, key.menuItem(s.id, c.id, it.id, "description"));
-    return `<div class="menu-item"><div>
-<span class="name">${esc(name)}</span>${it.tags.map((tag) => `<span class="tag">${esc(tag)}</span>`).join("")}
+    const alt = t(site, locale, key.menuItem(s.id, c.id, it.id, "alt"));
+    const img = it.imageId ? imageUrl(it.imageId, opts) : null;
+    // The badge is a labelled element, not a bare glyph: the raw TRUE/FALSE
+    // from the sheet is never shown, and a screen reader hears the label.
+    const badge = it.chefsChoice
+      ? `<span class="chefs" title="${esc(chefsLabel)}">${esc(chefsLabel)}</span>`
+      : "";
+    return `<div class="menu-item${img ? " has-image" : ""}">
+${img ? `<div class="menu-thumb"><img src="${esc(img)}" alt="${esc(alt)}" loading="lazy" decoding="async" width="200" height="200"></div>` : ""}
+<div class="menu-body">
+<span class="name">${esc(name)}</span>${badge}${it.tags.map((tag) => `<span class="tag">${esc(tag)}</span>`).join("")}
 ${desc ? `<p class="desc">${esc(desc)}</p>` : ""}
 </div>${it.price ? `<span class="price">${esc(it.price)}</span>` : ""}</div>`;
   }).join("")

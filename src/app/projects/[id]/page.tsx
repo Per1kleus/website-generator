@@ -8,10 +8,12 @@ import { architecture } from "@/lib/architectures";
 import { localeInfo } from "@/lib/locales";
 import { AppShell } from "@/components/AppShell";
 import { DesignQuestions, type DesignQuestion } from "@/components/DesignQuestions";
+import { MenuDataCard } from "@/components/MenuDataCard";
+import { getMenuSource } from "@/server/menu/source";
 import { AppBar, Banner, Card, LinkButton } from "@/components/ui";
 import {
   IconDownload, IconEye, IconGlobe, IconImage, IconLayers, IconPalette,
-  IconPencil, IconRocket, IconSettings,
+  IconPencil, IconRocket, IconSettings, IconSheet,
 } from "@/components/icons";
 import { SITE_KINDS } from "@/lib/site";
 
@@ -42,6 +44,8 @@ export default async function ProjectPage({
 
   const kind = SITE_KINDS.find((k) => k.id === project.site_kind);
   const versions = listVersions(id);
+  const isMenuProject = project.site_kind === "menu";
+  const menuSource = isMenuProject ? getMenuSource(id) : null;
   const assets = listAssets(id);
   const findings = project.site ? validateSite(project.site) : [];
   // Identity analysis may leave design decisions open; those become questions.
@@ -55,6 +59,14 @@ export default async function ProjectPage({
     { href: `/projects/${id}/edit`, label: "Edit sections", hint: `${project.site?.sections.length ?? 0} sections`, Icon: IconPencil },
     { href: `/projects/${id}/design`, label: "Design", hint: project.site ? architecture(project.site.theme.architecture).label : "Colours, fonts", Icon: IconPalette },
     { href: `/projects/${id}/media`, label: "Images", hint: `${assets.length} uploaded`, Icon: IconImage },
+    ...(isMenuProject
+      ? [{
+          href: `/projects/${id}/menu-data`,
+          label: "Menu data",
+          hint: menuSource?.spreadsheet_id ? "Google Sheets" : "Not connected",
+          Icon: IconSheet,
+        }]
+      : []),
     { href: `/projects/${id}/languages`, label: "Languages", hint: project.site ? project.site.meta.locales.map((l) => localeInfo(l).short).join(" · ") : "—", Icon: IconGlobe },
     { href: `/projects/${id}/versions`, label: "Versions", hint: `${versions.length} saved`, Icon: IconLayers },
     { href: `/projects/${id}/export`, label: "Export", hint: "Download a ZIP", Icon: IconDownload },
@@ -97,6 +109,8 @@ export default async function ProjectPage({
           >
             <IconEye size={20} /> Preview website
           </LinkButton>
+
+          {isMenuProject && <MenuDataCard projectId={id} source={menuSource} />}
 
           <DesignQuestions projectId={id} questions={questions} />
 

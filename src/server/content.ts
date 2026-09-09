@@ -27,6 +27,7 @@ export const ContentSchema = z.object({
   stickyCtaLabel: z.string(),
   skipToContent: z.string(),
   menuLabel: z.string(),
+  chefsChoiceLabel: z.string(),
   logoAlt: z.string(),
   sections: z.array(
     z.object({
@@ -222,7 +223,7 @@ Output ONLY a JSON object. Every section object must contain every key; use "" o
           content: `${brief({ ...args, plan })}
 
 Output ONLY this JSON shape:
-{"tagline":"","stickyCtaLabel":"","skipToContent":"","menuLabel":"","logoAlt":"","sections":[{"type":"","title":"","heading":"","eyebrow":"","headline":"","subheadline":"","body":"","note":"","intro":"","ctaLabel":"","secondaryLabel":"","address":"","bookingLabel":"","tagline":"","highlights":[""],"items":[{"name":"","description":"","price":""}],"categories":[{"name":"","items":[{"name":"","description":"","price":""}]}],"hours":[{"day":"","hours":""}],"testimonials":[{"quote":"","author":""}],"links":[{"label":"","href":""}]}],"seo":{"title":"","description":"","ogTitle":"","ogDescription":"","keywords":[""]}}`,
+{"tagline":"","stickyCtaLabel":"","skipToContent":"","menuLabel":"","chefsChoiceLabel":"","logoAlt":"","sections":[{"type":"","title":"","heading":"","eyebrow":"","headline":"","subheadline":"","body":"","note":"","intro":"","ctaLabel":"","secondaryLabel":"","address":"","bookingLabel":"","tagline":"","highlights":[""],"items":[{"name":"","description":"","price":""}],"categories":[{"name":"","items":[{"name":"","description":"","price":""}]}],"hours":[{"day":"","hours":""}],"testimonials":[{"quote":"","author":""}],"links":[{"label":"","href":""}]}],"seo":{"title":"","description":"","ogTitle":"","ogDescription":"","keywords":[""]}}`,
         },
       ],
     });
@@ -272,6 +273,7 @@ export function assembleSite(args: {
   strings[key.meta("stickyCtaLabel")] = c.stickyCtaLabel || c.sections[0]?.ctaLabel || "";
   strings[key.meta("skipToContent")] = c.skipToContent || "Skip to content";
   strings[key.meta("menuLabel")] = c.menuLabel || "Menu";
+  strings[key.meta("chefsChoiceLabel")] = c.chefsChoiceLabel || "Chef's choice";
   strings[key.meta("logoAlt")] = c.logoAlt || args.businessName;
 
   const menuSectionId = c.sections.find((s) => s.type === "menu") ? newId("sec") : "";
@@ -336,7 +338,7 @@ export function assembleSite(args: {
               const iid = newId("itm");
               strings[key.menuItem(id, cid, iid, "name")] = it.name;
               strings[key.menuItem(id, cid, iid, "description")] = it.description;
-              return { id: iid, price: it.price, tags: [] as string[] };
+              return { id: iid, price: it.price, tags: [] as string[], chefsChoice: false };
             });
             return { id: cid, items };
           });
@@ -551,6 +553,7 @@ function templateContent(
     stickyCtaLabel: "Contact",
     skipToContent: "Skip to content",
     menuLabel: "Menu",
+    chefsChoiceLabel: "Chef's choice",
     logoAlt: args.businessName,
     sections,
     seo: {

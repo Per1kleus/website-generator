@@ -264,3 +264,36 @@ async function zipSingleFile(html: string): Promise<Buffer> {
   await archive.finalize();
   return Buffer.concat(chunks);
 }
+
+/**
+ * Rewrites the published files for a project that is already live.
+ *
+ * Used after a menu sync so the customer-facing page reflects the spreadsheet
+ * without a manual redeploy. Only the built output changes — the same Site
+ * document theme is rendered, so the visual design cannot move.
+ *
+ * Returns the live URL when something was republished, otherwise null.
+ */
+export async function refreshDeployment(projectId: string, site: Site): Promise<string | null> {
+  const deployment = getLatestDeployment(projectId);
+  // Only built-in hosting is ours to rewrite; a Vercel/Netlify site needs a
+  // fresh deploy through their API, which is the creator's explicit action.
+  if (!deployment || deployment.status !== "live" || deployment.platform !== "builtin") {
+    return null;
+  }
+
+  try {
+    const base = deployment.url.replace(/\/$/, "");
+    const target = path.join(PUBLISH_DIR, deployment.slug);
+    for (const file of buildBundle(site, base)) {
+      const dest = path.join(target, file.name);
+      await mkdir(path.dirname(dest), { recursive: true });
+      if (file.kind === "text") await writeFile(dest, file.content, "utf8");
+      else if (existsSync(file.source)) await copyFile(file.source, dest);
+    }
+    return deployment.url;
+  } catch (err) {
+    console.error("[deploy] refresh failed:", err);
+    return null;
+  }
+}

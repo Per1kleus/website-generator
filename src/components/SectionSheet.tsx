@@ -507,7 +507,9 @@ function MenuEditor({
                         onChange({
                           ...section,
                           categories: section.categories.map((c) =>
-                            c.id !== cat.id ? c : { ...c, items: [...c.items, { id: newId("itm"), price: "", tags: [] }] },
+                            c.id !== cat.id
+                              ? c
+                              : { ...c, items: [...c.items, { id: newId("itm"), price: "", tags: [], chefsChoice: false }] },
                           ),
                         })
                       }

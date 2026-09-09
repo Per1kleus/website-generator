@@ -44,6 +44,8 @@ starts the download in the background, so a phone user is never waiting on it.
 | `OLLAMA_HOST` | Where the Ollama daemon lives. Default `http://127.0.0.1:11434`. |
 | `WG_OLLAMA_MODEL` | Which local model writes design queries. Default `qwen2.5:0.5b`. |
 | `WG_OLLAMA_AUTOPULL` | Set to `0` to never download a model automatically. |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Enables the Google Sheets menu source for Digital Menu projects. |
+| `WG_SECRET` | Encrypts stored Google tokens at rest. **Set this** on any deployment that holds more than your own tokens. |
 | `ANTHROPIC_API_KEY` | Enables business research (web search), visual identity analysis, content generation, translation and free-form AI editing. Without it the app still works end to end from the creator's own input, using a template generator and a rule-based editor. |
 | `WG_DATA_DIR` | Where the SQLite database, uploads and published sites live. Defaults to `./data`. |
 | `VERCEL_TOKEN` | Enables the Vercel deploy target. |
@@ -77,6 +79,9 @@ src/
     generator.ts      the pipeline that runs those stages in order
     validate.ts       content, design, language, technical, a11y findings
     bundle.ts         the static file set: one document per language
+    crypto.ts         AES-256-GCM for third-party tokens at rest
+    google/           OAuth, Sheets and Drive clients (read-only scopes)
+    menu/             processor, Drive image resolver, source state, sync
     uiux.ts           design-catalogue bridge: query building and mapping
     ollama.ts         local model: detection, background install, JSON client
     ai-edit.ts        AI editing, locale-scoped, with structural guarantees
@@ -246,6 +251,84 @@ npm run refresh:skill && npm run test:mobile
 A catalogue change can legitimately move the recommended palette or typography,
 so the suites are re-run afterwards.
 
+## Digital menus from Google Sheets
+
+For a Digital Menu project the spreadsheet is the source of truth for menu
+content. The restaurant edits a Google Sheet; the builder syncs; the public
+menu updates. Nobody edits the generated website by hand.
+
+```
+Google Sheets ──▶ Sheets API ──▶ Menu Data Processor ──▶ validated data
+                                                              │
+Google Drive ───▶ image resolver ──▶ local optimised assets ──┤
+                                                              ▼
+                                                    the Site document
+                                                              │
+                                                              ▼
+                                              static Digital Menu ──▶ customer
+```
+
+### The sheet's contract
+
+Row 1 must contain exactly these headers, and every row below is one item:
+
+```
+name | price | description | chefs choice | category | imageurl
+```
+
+- **`chefs choice`** is a checkbox. Ticked items get a Chef's Choice badge;
+  `TRUE`/`FALSE` is never shown to a customer.
+- **`category`** groups the menu and is best set as a dropdown. Categories are
+  read from the sheet, never hardcoded, and only ones with items are rendered.
+- **`imageurl`** takes a Google Drive link, in any of the shapes people
+  actually paste — `/file/d/…`, `?id=…`, `/thumbnail?id=…`, or a bare file id.
+
+### Images are fetched, not hot-linked
+
+A Drive sharing URL cannot be used as an `<img src>`: those endpoints redirect
+through an interstitial, need the viewer's own Google session, and are rate
+limited. So each image is downloaded once server-side with the creator's
+credentials, run through the same pipeline as an uploaded photo (EXIF stripped,
+resized, WebP), and served from the site. The customer's browser never touches
+Google.
+
+### One bad row never breaks the menu
+
+Every row is validated independently. An invalid row is dropped from the menu
+and reported to the builder by **row number and column** — "Row 6 · price:
+'ask the chef' is not a valid price" — while every valid row keeps working. A
+missing required column is refused outright rather than silently half-imported.
+
+### Where the boundary sits
+
+The builder holds all of it: the OAuth connection, the spreadsheet picker,
+validation output and Sync Now. The generated menu holds none of it — no sync
+controls, no spreadsheet references, no admin surface. A customer cannot tell
+that Google Sheets is involved, which is the point.
+
+Tokens are encrypted at rest, live only in server modules, and never reach a
+response body or generated page. Only `spreadsheets.readonly` and
+`drive.readonly` are requested; nothing is ever written to the creator's Drive.
+
+### Sync and caching
+
+The public menu is static HTML, so it makes **no Google request per visitor**.
+Sync writes into the Site document and, when the project is already live on
+built-in hosting, rewrites the published files. Menu content changes; the
+design does not — the same theme is re-rendered.
+
+Each sync snapshots the previous version first, so a bad spreadsheet edit is
+undoable. If Google cannot be reached, the error is shown in the builder and
+**the last good menu keeps serving** — nothing is invented to fill the gap.
+
+### Languages
+
+The sheet stays single-language. Item names, descriptions and category labels
+flow into the existing string catalog and are translated by the existing
+system; prices, images and chef's-choice status are structural and live outside
+the catalog, so a translation pass physically cannot alter them. No duplicate
+spreadsheet per language.
+
 ## Multi-language
 
 Two separate layers, as the requirements draw them:
@@ -315,6 +398,7 @@ layouts:
 npm start &
 npm run test:mobile     # 207 checks: the whole product on a phone
 npm run test:design     # 21 checks: the design engine across all its tiers
+npm run test:menu       # 47 checks: the Google Sheets menu pipeline
 ```
 
 The harness drives the entire workflow on a 390×844 touch viewport — including
@@ -357,3 +441,13 @@ Ollama daemon so no real one is needed:
 It also asserts the properties that keep web fonts from becoming load-bearing:
 `display=swap`, a local fallback stack behind every web family, and no font
 requests at all from a digital menu.
+
+`test:menu` drives the whole Sheets flow against a stub Google, so no real
+credentials are needed: connect → pick spreadsheet → pick tab → validate
+columns → sync → render. Its fixture sheet deliberately contains a bad price,
+an empty name, a junk checkbox, an unreachable image and blank padding rows, so
+per-row validation is tested rather than assumed. It asserts that syncing never
+changes the theme, that prices and images are byte-identical across languages,
+that item ids are stable across re-syncs so translations survive, that the
+public page contains no builder controls or Google references, and that a
+failed sync leaves the last good menu serving.

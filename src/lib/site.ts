@@ -59,8 +59,15 @@ export type SectionType =
 /** A repeatable row. `id` anchors its translated strings in the catalog. */
 export type ListRow = { id: string };
 export type PricedRow = ListRow & { price: string };
-export type MenuItemRow = PricedRow & { tags: string[]; imageId?: string };
-export type MenuCategoryRow = ListRow & { items: MenuItemRow[] };
+export type MenuItemRow = PricedRow & {
+  tags: string[];
+  imageId?: string;
+  /** From the sheet's "chefs choice" checkbox. Never translated. */
+  chefsChoice?: boolean;
+  /** Stable key from the menu source, so translations survive a re-sync. */
+  sourceKey?: string;
+};
+export type MenuCategoryRow = ListRow & { items: MenuItemRow[]; sourceKey?: string };
 export type HoursRow = ListRow & { hours: string };
 export type LinkRow = ListRow & { href: string };
 
@@ -207,6 +214,7 @@ export function sectionKeys(section: Section): string[] {
             key.menuItem(section.id, c.id, it.id, "name"),
             key.menuItem(section.id, c.id, it.id, "description"),
           );
+          if (it.imageId) k.push(key.menuItem(section.id, c.id, it.id, "alt"));
         }
       }
       break;
@@ -247,7 +255,12 @@ export function sectionKeys(section: Section): string[] {
   return k;
 }
 
-export const META_KEYS = ["tagline", "stickyCtaLabel", "logoAlt", "skipToContent", "menuLabel"];
+export const META_KEYS = [
+  "tagline", "stickyCtaLabel", "logoAlt", "skipToContent", "menuLabel",
+  // The Chef's Choice badge is visitor-facing text, so it is translated like
+  // any other string rather than hardcoded in the renderer.
+  "chefsChoiceLabel",
+];
 
 export function allKeys(site: Site): string[] {
   return [

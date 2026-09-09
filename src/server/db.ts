@@ -65,6 +65,36 @@ function migrate(handle: Database.Database) {
       updated_at    INTEGER NOT NULL
     );
 
+    /* Google account connected by a creator, for Digital Menu sources.
+       Tokens are encrypted at rest; see server/crypto.ts. */
+    CREATE TABLE IF NOT EXISTS google_accounts (
+      user_id       TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      email         TEXT NOT NULL DEFAULT '',
+      access_token  TEXT NOT NULL,
+      refresh_token TEXT NOT NULL DEFAULT '',
+      expires_at    INTEGER NOT NULL DEFAULT 0,
+      scope         TEXT NOT NULL DEFAULT '',
+      created_at    INTEGER NOT NULL,
+      updated_at    INTEGER NOT NULL
+    );
+
+    /* Which spreadsheet/tab a Digital Menu project reads from, plus the
+       result of the last synchronisation. One source per project. */
+    CREATE TABLE IF NOT EXISTS menu_sources (
+      project_id       TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+      provider         TEXT NOT NULL DEFAULT 'google-sheets',
+      spreadsheet_id   TEXT NOT NULL DEFAULT '',
+      spreadsheet_name TEXT NOT NULL DEFAULT '',
+      sheet_title      TEXT NOT NULL DEFAULT '',
+      status           TEXT NOT NULL DEFAULT 'disconnected',
+      last_sync_at     INTEGER NOT NULL DEFAULT 0,
+      last_error       TEXT NOT NULL DEFAULT '',
+      stats            TEXT NOT NULL DEFAULT '{}',
+      findings         TEXT NOT NULL DEFAULT '[]',
+      created_at       INTEGER NOT NULL,
+      updated_at       INTEGER NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS project_locales (
       project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
       locale     TEXT NOT NULL,
@@ -145,6 +175,7 @@ const COLUMNS: [table: string, column: string, ddl: string][] = [
   ["projects", "design_answers", "TEXT NOT NULL DEFAULT '{}'"],
   ["assets", "role", "TEXT NOT NULL DEFAULT 'photo'"],
   ["assets", "has_alpha", "INTEGER NOT NULL DEFAULT 0"],
+  ["assets", "drive_file_id", "TEXT NOT NULL DEFAULT ''"],
 ];
 
 function addColumns(handle: Database.Database) {

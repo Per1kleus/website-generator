@@ -13,7 +13,8 @@
     "setup": "node scripts/setup.mjs",
     "refresh:skill": "node scripts/refresh-uiux-skill.mjs",
     "postinstall": "node scripts/setup.mjs || true",
-    "test:design": "node scripts/design-engine-qa.mjs"
+    "test:design": "node scripts/design-engine-qa.mjs",
+    "test:menu": "node scripts/menu-data-qa.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.124.0",

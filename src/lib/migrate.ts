@@ -45,6 +45,7 @@ export function migrateToV2(doc: unknown, defaultLocale = "en"): Site {
   strings[key.meta("logoAlt")] = str(meta.businessName);
   strings[key.meta("skipToContent")] = "Skip to content";
   strings[key.meta("menuLabel")] = "Menu";
+  strings[key.meta("chefsChoiceLabel")] = "Chef's choice";
 
   for (const s of arr(v1.sections) as V1Section[]) {
     const p = (s.props ?? {}) as Record<string, unknown>;
@@ -111,6 +112,7 @@ export function migrateToV2(doc: unknown, defaultLocale = "en"): Site {
               id: iid,
               price: str(it.price),
               tags: arr(it.tags).map(str).filter(Boolean),
+              chefsChoice: false,
             };
           });
           return { id: cid, items };
