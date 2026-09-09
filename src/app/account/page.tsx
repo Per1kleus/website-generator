@@ -1,11 +1,13 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/server/auth";
+import { isDesktop } from "@/server/runtime";
 import { listProjects } from "@/server/projects";
 import { AppShell } from "@/components/AppShell";
 import { AppBar, Card } from "@/components/ui";
 import { AccountActions } from "@/components/AccountActions";
 import { DesignEngineCard } from "@/components/DesignEngineCard";
+import { LocalSettingsCard } from "@/components/LocalSettingsCard";
 
 export const metadata: Metadata = { title: "Profile" };
 
@@ -48,17 +50,22 @@ export default async function AccountPage() {
 
       <DesignEngineCard />
 
+      {/* Only the desktop application has keys of its own to hold. */}
+      {isDesktop() && <LocalSettingsCard />}
+
       <AccountActions />
 
-      <Card className="mt-4">
-        <h2 className="font-bold">Install on your phone</h2>
-        <p className="mt-1.5 text-sm text-muted">
-          Add this app to your home screen for a full-screen, app-like
-          experience. On iPhone use Share → Add to Home Screen; on Android use
-          the browser menu → Install app. Everything works in the browser too —
-          installing is optional.
-        </p>
-      </Card>
+      {!isDesktop() && (
+        <Card className="mt-4">
+          <h2 className="font-bold">Install on your phone</h2>
+          <p className="mt-1.5 text-sm text-muted">
+            Add this app to your home screen for a full-screen, app-like
+            experience. On iPhone use Share → Add to Home Screen; on Android
+            use the browser menu → Install app. Everything works in the browser
+            too — installing is optional.
+          </p>
+        </Card>
+      )}
     </AppShell>
   );
 }

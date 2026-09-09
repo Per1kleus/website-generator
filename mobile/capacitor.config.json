@@ -1,0 +1,15 @@
+{
+  "appId": "app.websitegenerator.mobile",
+  "appName": "Website Generator",
+  "webDir": "android-shell/www",
+  "android": {
+    "allowMixedContent": false
+  },
+  "server": {
+    "androidScheme": "https",
+    "cleartext": false
+  },
+  "plugins": {
+    "CapacitorHttp": { "enabled": false }
+  }
+}

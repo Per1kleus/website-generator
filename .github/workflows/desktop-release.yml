@@ -1,0 +1,95 @@
+# Produces the real, installable artifacts on the platforms that can build them.
+#
+# Neither artifact contains a secret. The Windows installer bundles the
+# application server, a Node runtime and the app icon; the Android APK is a
+# thin client and bundles only the address of the deployment it talks to.
+# Anthropic keys, Google OAuth credentials and WG_SECRET stay on the machine
+# that runs the server and are never staged into a build.
+name: Package
+
+on:
+  workflow_dispatch:
+    inputs:
+      android_backend_url:
+        description: "https:// address the Android app should open (blank = ask on first run)"
+        required: false
+        default: ""
+  push:
+    tags: ["v*"]
+
+jobs:
+  windows:
+    name: Windows installer (.exe)
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/tauri/src-tauri
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install the Tauri CLI
+        run: npm install --no-save @tauri-apps/cli@^2
+
+      # Optional. With it the design catalogue works on machines without
+      # Python; without it the app falls back exactly as it does today.
+      - name: Fetch an embeddable Python runtime
+        shell: pwsh
+        run: |
+          $url = "https://www.python.org/ftp/python/3.12.7/python-3.12.7-embed-amd64.zip"
+          Invoke-WebRequest -Uri $url -OutFile python-embed.zip
+          Expand-Archive python-embed.zip -DestinationPath python-embed
+          "WG_PYTHON_DIR=$(Resolve-Path python-embed)" >> $env:GITHUB_ENV
+
+      - name: Build the installer
+        run: npm run build:windows
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: website-generator-windows
+          path: desktop/tauri/src-tauri/target/release/bundle/nsis/*.exe
+          if-no-files-found: error
+
+  android:
+    name: Android client (.apk)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build the debug APK
+        env:
+          WG_REMOTE_URL: ${{ inputs.android_backend_url }}
+        run: npm run build:android
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: website-generator-android
+          path: mobile/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error

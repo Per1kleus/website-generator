@@ -1,0 +1,27 @@
+[package]
+name = "website-generator-desktop"
+version = "1.0.0"
+description = "Website Generator"
+authors = ["Website Generator"]
+edition = "2021"
+rust-version = "1.77"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-shell = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-single-instance = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+# A desktop shell should be small and start fast: strip symbols, optimise for
+# size, and let LTO drop everything unused.
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

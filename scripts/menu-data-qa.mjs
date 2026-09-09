@@ -14,8 +14,7 @@
  *   node scripts/menu-data-qa.mjs
  */
 import { spawn } from "node:child_process";
-import { mkdirSync } from "node:fs";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -44,6 +43,15 @@ async function waitFor(fn, { timeout = 60000, interval = 400 } = {}) {
 }
 
 const children = [];
+/**
+ * This container pre-installs Chromium outside Playwright's own cache. Fall
+ * back to Playwright's resolution so the suite also runs on a plain machine.
+ */
+function chromeExecutable() {
+  const preset = "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
+  return process.env.PW_CHROME ?? (existsSync(preset) ? preset : undefined);
+}
+
 function spawnChild(cmd, args, env) {
   const child = spawn(cmd, args, {
     env: { ...process.env, ...env },
@@ -337,7 +345,7 @@ try {
     try {
       const { chromium } = await import("playwright");
       const browser = await chromium.launch({
-        executablePath: process.env.PW_CHROME ?? "/opt/pw-browsers/chromium-1194/chrome-linux/chrome",
+        ...(chromeExecutable() ? { executablePath: chromeExecutable() } : {}),
       });
       const ctx = await browser.newContext({
         viewport: { width: 390, height: 900 },

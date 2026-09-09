@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Website Generator</title>
+<style>
+  :root { color-scheme: light dark; --bg:#f7f7f8; --ink:#14141a; --muted:#62626e; --brand:#4338ca; --line:#e2e2e7; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#0d0d11; --ink:#f2f2f5; --muted:#a0a0ad; --brand:#8b83ff; --line:#2e2e38; }
+  }
+  * { box-sizing: border-box; }
+  html, body { height:100%; margin:0; }
+  body {
+    display:grid; place-items:center; background:var(--bg); color:var(--ink);
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    padding: max(1.5rem, env(safe-area-inset-left)) 1.5rem;
+  }
+  main { width:100%; max-width:24rem; text-align:center; }
+  h1 { font-size:1.0625rem; margin:0 0 .35rem; }
+  p { color:var(--muted); font-size:.875rem; line-height:1.55; margin:0 0 1.25rem; }
+  label { display:block; text-align:left; font-size:.8125rem; font-weight:600; margin-bottom:.4rem; }
+  input {
+    width:100%; min-height:3rem; padding:.75rem 1rem; font-size:max(1rem,16px);
+    border:1px solid var(--line); border-radius:.75rem; background:var(--bg); color:var(--ink);
+  }
+  button {
+    width:100%; min-height:3rem; margin-top:.75rem; border:0; border-radius:.75rem;
+    background:var(--brand); color:var(--bg); font:inherit; font-weight:650;
+  }
+  .err { color:#b42318; font-size:.8125rem; margin-top:.75rem; min-height:1.2em; }
+  .spinner {
+    width:20px; height:20px; margin:1.5rem auto 0; border-radius:50%;
+    border:2px solid var(--line); border-top-color:var(--brand); animation:spin .8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 4s; } }
+  .hidden { display:none; }
+</style>
+</head>
+<body>
+<main>
+  <div id="connecting">
+    <h1>Website Generator</h1>
+    <p>Connecting…</p>
+    <div class="spinner" role="status" aria-label="Connecting"></div>
+  </div>
+
+  <!--
+    Shown only when no backend was baked in at build time, or the configured
+    one cannot be reached. Android cannot run the application's server — it
+    needs Node, SQLite, sharp and Python — so it is a client to a deployment.
+  -->
+  <form id="setup" class="hidden" autocomplete="off">
+    <h1>Connect to your workspace</h1>
+    <p>Enter the address of your Website Generator server.</p>
+    <label for="url">Server address</label>
+    <input id="url" type="url" inputmode="url" autocapitalize="none" autocorrect="off"
+           spellcheck="false" placeholder="https://generator.example.com" enterkeyhint="go">
+    <button type="submit">Connect</button>
+    <p class="err" id="err" role="alert"></p>
+  </form>
+</main>
+
+<script type="module">
+  // WG_REMOTE_URL is written here at build time by scripts/build-android.mjs
+  // when the developer supplies one, so a distributed APK opens straight into
+  // the app with nothing to configure.
+  const BAKED = "__WG_REMOTE_URL__";
+  const KEY = "wg-backend";
+
+  const connecting = document.getElementById("connecting");
+  const setup = document.getElementById("setup");
+  const err = document.getElementById("err");
+
+  const stored = (() => { try { return localStorage.getItem(KEY); } catch { return null; } })();
+  const configured = (BAKED.startsWith("http") ? BAKED : "") || stored || "";
+
+  async function reachable(base) {
+    try {
+      const res = await fetch(`${base.replace(/\/+$/, "")}/api/health`, {
+        signal: AbortSignal.timeout(8000),
+      });
+      return res.ok;
+    } catch {
+      return false;
+    }
+  }
+
+  function askForServer(message) {
+    connecting.classList.add("hidden");
+    setup.classList.remove("hidden");
+    if (message) err.textContent = message;
+    if (configured) document.getElementById("url").value = configured;
+  }
+
+  setup.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    err.textContent = "";
+    const value = document.getElementById("url").value.trim().replace(/\/+$/, "");
+    if (!/^https?:\/\//i.test(value)) {
+      err.textContent = "Enter a full address starting with https://";
+      return;
+    }
+    if (!(await reachable(value))) {
+      err.textContent = "Unable to connect to the service. Check the address and your internet connection.";
+      return;
+    }
+    try { localStorage.setItem(KEY, value); } catch { /* private mode */ }
+    location.replace(value);
+  });
+
+  if (!configured) {
+    askForServer("");
+  } else if (await reachable(configured)) {
+    location.replace(configured);
+  } else {
+    askForServer("Unable to connect to the service. Please check your internet connection and try again.");
+  }
+</script>
+</body>
+</html>

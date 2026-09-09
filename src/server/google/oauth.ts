@@ -1,6 +1,8 @@
 import "server-only";
+import { createHash, randomBytes } from "node:crypto";
 import { db } from "../db";
 import { decryptSecret, encryptSecret } from "../crypto";
+import { isDesktop } from "../runtime";
 
 /**
  * Google OAuth for the builder application.
@@ -31,8 +33,48 @@ export const SCOPES = [
   "https://www.googleapis.com/auth/drive.readonly",
 ];
 
+/**
+ * A desktop build uses a Google "Desktop app" OAuth client, which Google
+ * documents as *not* confidential — its secret is not a secret once shipped.
+ * The correct proof there is PKCE, so no client secret is required, and none
+ * is embedded in the installer.
+ *
+ * A web deployment keeps the confidential "Web application" client and its
+ * secret, which never leaves the server.
+ */
 export function googleConfigured(): boolean {
-  return Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
+  if (!process.env.GOOGLE_CLIENT_ID) return false;
+  return isDesktop() ? true : Boolean(process.env.GOOGLE_CLIENT_SECRET);
+}
+
+/* -------------------------------------------------------------------------
+   PKCE (RFC 7636), used by the desktop flow.
+
+   The verifier is held server-side for the life of one sign-in. It never
+   reaches the client, so nothing in the packaged application can be replayed.
+------------------------------------------------------------------------- */
+
+const verifiers = new Map<string, { verifier: string; expires: number }>();
+
+function pruneVerifiers() {
+  const now = Date.now();
+  for (const [state, entry] of verifiers) {
+    if (entry.expires < now) verifiers.delete(state);
+  }
+}
+
+export function createPkce(state: string): string {
+  pruneVerifiers();
+  const verifier = randomBytes(32).toString("base64url");
+  verifiers.set(state, { verifier, expires: Date.now() + 10 * 60_000 });
+  return createHash("sha256").update(verifier).digest("base64url");
+}
+
+function takeVerifier(state: string): string | null {
+  const entry = verifiers.get(state);
+  verifiers.delete(state);
+  if (!entry || entry.expires < Date.now()) return null;
+  return entry.verifier;
 }
 
 export function redirectUri(origin: string): string {
@@ -54,6 +96,12 @@ export function authorizeUrl(origin: string, state: string): string {
     include_granted_scopes: "true",
     state,
   });
+
+  if (isDesktop()) {
+    params.set("code_challenge", createPkce(state));
+    params.set("code_challenge_method", "S256");
+  }
+
   return `${OAUTH_BASE}/o/oauth2/v2/auth?${params.toString()}`;
 }
 
@@ -124,18 +172,35 @@ export async function exchangeCode(
   userId: string,
   code: string,
   origin: string,
+  state = "",
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   try {
+    const form: Record<string, string> = {
+      code,
+      client_id: process.env.GOOGLE_CLIENT_ID ?? "",
+      redirect_uri: redirectUri(origin),
+      grant_type: "authorization_code",
+    };
+
+    if (isDesktop()) {
+      const verifier = takeVerifier(state);
+      if (!verifier) {
+        return { ok: false, error: "That sign-in took too long. Please try again." };
+      }
+      form.code_verifier = verifier;
+      // A Desktop client may still carry a secret; send it when the operator
+      // configured one, but never require it.
+      if (process.env.GOOGLE_CLIENT_SECRET) {
+        form.client_secret = process.env.GOOGLE_CLIENT_SECRET;
+      }
+    } else {
+      form.client_secret = process.env.GOOGLE_CLIENT_SECRET ?? "";
+    }
+
     const res = await fetch(TOKEN_URL, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        code,
-        client_id: process.env.GOOGLE_CLIENT_ID ?? "",
-        client_secret: process.env.GOOGLE_CLIENT_SECRET ?? "",
-        redirect_uri: redirectUri(origin),
-        grant_type: "authorization_code",
-      }),
+      body: new URLSearchParams(form),
     });
     const data = (await res.json()) as Record<string, string | number>;
     if (!res.ok || typeof data.access_token !== "string") {
@@ -194,7 +259,9 @@ export async function accessTokenFor(userId: string): Promise<string | null> {
       body: new URLSearchParams({
         refresh_token: refresh,
         client_id: process.env.GOOGLE_CLIENT_ID ?? "",
-        client_secret: process.env.GOOGLE_CLIENT_SECRET ?? "",
+        ...(process.env.GOOGLE_CLIENT_SECRET
+          ? { client_secret: process.env.GOOGLE_CLIENT_SECRET }
+          : {}),
         grant_type: "refresh_token",
       }),
     });

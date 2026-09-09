@@ -329,6 +329,37 @@ system; prices, images and chef's-choice status are structural and live outside
 the catalog, so a translation pass physically cannot alter them. No duplicate
 spreadsheet per language.
 
+## Downloadable applications
+
+The same product, packaged for people who would rather install something than
+run a server.
+
+**Windows** — a `.exe` installer. It bundles the real application server and a
+Node runtime, and runs them on a loopback port on the user's own machine, so
+there is nothing to configure and nothing to keep running elsewhere. Download →
+install → open → use, with no terminal at any point.
+
+**Android** — an `.apk`. A phone cannot run a Node server with native modules
+and a Python subprocess, so the Android app is a client to a deployment rather
+than a second implementation: the same interface, over the network. It asks for
+the backend address once, or the build bakes it in.
+
+```bash
+npm run build:windows                                      # → NSIS installer
+WG_REMOTE_URL=https://example.com npm run build:android     # → APK
+npm run test:desktop                                        # 36 packaging checks
+```
+
+Neither artifact contains a secret. The desktop app uses a Google **Desktop
+app** OAuth client — loopback redirect, PKCE, no client secret to ship — and a
+user's own API keys are typed into the app's Profile screen and kept encrypted
+in their Windows profile, never in the installer. `npm run test:desktop`
+asserts that, along with the sidecar lifecycle and the OAuth flow, without
+needing a Windows machine.
+
+Full details — Google Cloud setup, build prerequisites, every new environment
+variable, and the limitations — are in [docs/PACKAGING.md](docs/PACKAGING.md).
+
 ## Multi-language
 
 Two separate layers, as the requirements draw them:
@@ -399,6 +430,7 @@ npm start &
 npm run test:mobile     # 207 checks: the whole product on a phone
 npm run test:design     # 21 checks: the design engine across all its tiers
 npm run test:menu       # 47 checks: the Google Sheets menu pipeline
+npm run test:desktop    # 36 checks: the packaged desktop app
 ```
 
 The harness drives the entire workflow on a 390×844 touch viewport — including
@@ -441,6 +473,20 @@ Ollama daemon so no real one is needed:
 It also asserts the properties that keep web fonts from becoming load-bearing:
 `display=swap`, a local fallback stack behind every web family, and no font
 requests at all from a digital menu.
+
+`test:desktop` covers packaging without needing Windows: it boots the real
+sidecar the way the shell does, then asserts the properties that make a
+downloadable build safe — the server binds loopback only, the consent URL
+carries a PKCE S256 challenge and no client secret, the callback renders a page
+instead of navigating the app, stored tokens never reach a response, a key
+saved from inside the app is encrypted on disk and never echoed back, a
+variable outside the settings allowlist is ignored, a Google outage produces a
+message rather than a stack trace, and closing the shell's stdin stops the
+bundled server with no orphan left behind. It also renders a real page and its
+stylesheet through the packaged server rather than only calling API routes —
+which is how the one bug that would have broken every installed copy was found:
+Next stages its native-module externals as symlinks, and symlinks do not
+survive being bundled into an installer.
 
 `test:menu` drives the whole Sheets flow against a stub Google, so no real
 credentials are needed: connect → pick spreadsheet → pick tab → validate

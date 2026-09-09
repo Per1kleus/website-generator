@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Website Generator</title>
+<style>
+  /* Deliberately matches the application's own tokens so the splash reads as
+     the same product rather than a loading page bolted in front of it. */
+  :root { color-scheme: light dark; --bg:#f7f7f8; --ink:#14141a; --muted:#62626e; --brand:#4338ca; --line:#e2e2e7; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#0d0d11; --ink:#f2f2f5; --muted:#a0a0ad; --brand:#8b83ff; --line:#2e2e38; }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    display: grid; place-items: center; background: var(--bg); color: var(--ink);
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    -webkit-user-select: none; user-select: none;
+  }
+  main { text-align: center; max-width: 26rem; padding: 2rem; }
+  .mark { width: 64px; height: 64px; margin: 0 auto 1.25rem; }
+  h1 { font-size: 1.0625rem; font-weight: 650; margin: 0 0 .35rem; }
+  p { color: var(--muted); font-size: .875rem; margin: 0; line-height: 1.55; }
+  .spinner {
+    width: 20px; height: 20px; margin: 1.5rem auto 0; border-radius: 50%;
+    border: 2px solid var(--line); border-top-color: var(--brand);
+    animation: spin .8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 4s; } }
+  .error { display: none; }
+  body.failed .loading { display: none; }
+  body.failed .error { display: block; }
+  .reason {
+    margin-top: 1rem; padding: .75rem 1rem; border-radius: .75rem;
+    background: color-mix(in srgb, var(--ink) 6%, transparent);
+    font-size: .8125rem; color: var(--muted); word-break: break-word;
+  }
+  button {
+    margin-top: 1.25rem; min-height: 2.75rem; padding: 0 1.5rem; border: 0;
+    border-radius: .75rem; background: var(--brand); color: var(--bg);
+    font: inherit; font-weight: 650; cursor: pointer;
+  }
+</style>
+</head>
+<body>
+<main>
+  <svg class="mark" viewBox="0 0 512 512" aria-hidden="true">
+    <rect width="512" height="512" rx="112" fill="#4338ca"/>
+    <rect x="112" y="120" width="288" height="272" rx="36" fill="#fff"/>
+    <rect x="112" y="120" width="288" height="60" rx="30" fill="#c7d2fe"/>
+    <circle cx="152" cy="150" r="12" fill="#4338ca"/><circle cx="192" cy="150" r="12" fill="#4338ca"/>
+    <rect x="148" y="216" width="216" height="26" rx="13" fill="#4338ca"/>
+    <rect x="148" y="266" width="150" height="20" rx="10" fill="#a5b4fc"/>
+    <rect x="148" y="308" width="120" height="46" rx="23" fill="#4338ca"/>
+  </svg>
+
+  <div class="loading">
+    <h1>Starting Website Generator</h1>
+    <p>Just a moment.</p>
+    <div class="spinner" role="status" aria-label="Starting"></div>
+  </div>
+
+  <div class="error" role="alert">
+    <h1>Website Generator could not start</h1>
+    <p>The application service on this computer did not start.</p>
+    <div class="reason" id="reason"></div>
+    <button type="button" onclick="location.reload()">Try again</button>
+  </div>
+</main>
+
+<script type="module">
+  // Plain, human wording — never a stack trace. The shell emits the reason.
+  try {
+    const { listen } = window.__TAURI__.event;
+    await listen("wg://failed", (event) => {
+      document.getElementById("reason").textContent =
+        String(event.payload ?? "").trim() ||
+        "Unable to start the service. Please try again.";
+      document.body.classList.add("failed");
+    });
+  } catch {
+    // Opened outside the shell (during development): leave the splash as-is.
+  }
+</script>
+</body>
+</html>

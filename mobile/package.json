@@ -1,0 +1,15 @@
+{
+  "name": "website-generator-android",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Android client for the Website Generator. Built by scripts/build-android.mjs.",
+  "dependencies": {
+    "@capacitor/android": "^7.0.0",
+    "@capacitor/app": "^7.0.0",
+    "@capacitor/browser": "^7.0.0",
+    "@capacitor/core": "^7.0.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^7.0.0"
+  }
+}

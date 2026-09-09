@@ -15,6 +15,7 @@
  *   node scripts/mock-google.mjs [port]
  */
 import { createServer } from "node:http";
+import { createHash } from "node:crypto";
 import { deflateSync } from "node:zlib";
 
 const port = Number(process.argv[2] || 11700);
@@ -117,6 +118,8 @@ const SHEETS = {
 };
 
 let issuedRefresh = 0;
+let lastChallenge = null;
+let lastChallengeMethod = null;
 
 const server = createServer((req, res) => {
   const url = new URL(req.url, `http://127.0.0.1:${port}`);
@@ -132,6 +135,10 @@ const server = createServer((req, res) => {
     // Stand in for the consent screen: bounce straight back with a code.
     const redirect = url.searchParams.get("redirect_uri");
     const state = url.searchParams.get("state");
+    // A Desktop client must present a PKCE challenge; remember it so the
+    // token exchange can be verified the way Google verifies it.
+    lastChallenge = url.searchParams.get("code_challenge");
+    lastChallengeMethod = url.searchParams.get("code_challenge_method");
     res.writeHead(302, { Location: `${redirect}?code=mock-code&state=${encodeURIComponent(state ?? "")}` });
     return res.end();
   }
@@ -146,6 +153,21 @@ const server = createServer((req, res) => {
         return send(200, { access_token: "mock-access-refreshed", expires_in: 3600 });
       }
       if (form.get("code") !== "mock-code") return send(400, { error: "invalid_grant" });
+
+      // PKCE: when a challenge was presented, the verifier must hash to it.
+      if (lastChallenge) {
+        const verifier = form.get("code_verifier");
+        if (!verifier) {
+          return send(400, { error: "invalid_grant", error_description: "code_verifier required" });
+        }
+        if (lastChallengeMethod !== "S256") {
+          return send(400, { error: "invalid_request", error_description: "S256 required" });
+        }
+        const digest = createHash("sha256").update(verifier).digest("base64url");
+        if (digest !== lastChallenge) {
+          return send(400, { error: "invalid_grant", error_description: "PKCE mismatch" });
+        }
+      }
       send(200, {
         access_token: "mock-access",
         refresh_token: "mock-refresh",

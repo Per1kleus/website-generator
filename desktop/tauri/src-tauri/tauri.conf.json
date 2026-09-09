@@ -1,0 +1,48 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Website Generator",
+  "version": "1.0.0",
+  "identifier": "app.websitegenerator.desktop",
+  "build": {
+    "frontendDist": "../ui"
+  },
+  "app": {
+    "windows": [],
+    "security": {
+      "csp": null,
+      "capabilities": [
+        "default"
+      ]
+    },
+    "withGlobalTauri": true
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "nsis"
+    ],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.ico"
+    ],
+    "resources": {
+      "../../../.next/standalone/": "server/",
+      "../../sidecar/launch.mjs": "sidecar/launch.mjs"
+    },
+    "externalBin": [
+      "binaries/wg-node"
+    ],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "displayLanguageSelector": false,
+        "installerIcon": "icons/icon.ico",
+        "compression": "lzma"
+      }
+    },
+    "shortDescription": "Generate websites and digital menus",
+    "longDescription": "Research a business, generate a mobile-first website or digital menu, edit it in any language, and publish it."
+  }
+}

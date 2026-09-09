@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import { NativeShell } from "@/components/NativeShell";
 import { ServiceWorker } from "@/components/ServiceWorker";
 
 export const metadata: Metadata = {
@@ -46,6 +47,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           Skip to main content
         </a>
         {children}
+        <NativeShell />
         <ServiceWorker />
       </body>
     </html>

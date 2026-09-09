@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/server/auth";
 import { authorizeUrl, googleConfigured } from "@/server/google/oauth";
+import { isDesktop, selfOrigin } from "@/server/runtime";
 
 /** Starts the Google consent flow for the signed-in creator. */
 export async function GET(req: Request) {
@@ -21,6 +22,10 @@ export async function GET(req: Request) {
 
   const url = new URL(req.url);
   const returnTo = url.searchParams.get("returnTo") ?? "/";
+  // The loopback origin the desktop server is actually reachable at. Google
+  // matches the redirect URI exactly, and the port is ephemeral, so it has to
+  // come from the running server rather than from the request URL alone.
+  const origin = selfOrigin(url.origin);
 
   // A random state, held in an httpOnly cookie, so a forged callback cannot
   // attach someone else's Google account to this session.
@@ -41,5 +46,14 @@ export async function GET(req: Request) {
     maxAge: 600,
   });
 
-  return NextResponse.redirect(authorizeUrl(url.origin, state));
+  const consent = authorizeUrl(origin, state);
+
+  // Google refuses OAuth inside an embedded webview, so a desktop build must
+  // send the user to their own browser. The caller asks for the URL and the
+  // shell opens it; a plain redirect would load it inside the app window.
+  if (isDesktop() && url.searchParams.get("mode") === "url") {
+    return NextResponse.json({ url: consent, flow: "system-browser" });
+  }
+
+  return NextResponse.redirect(consent);
 }

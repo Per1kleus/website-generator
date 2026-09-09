@@ -11,11 +11,17 @@
  * Run with: node scripts/mobile-qa.mjs [baseUrl]
  */
 import { chromium } from "playwright";
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import sharp from "sharp";
 
 const BASE = process.argv[2] ?? "http://localhost:3100";
-const EXEC = process.env.PW_CHROME ?? "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
+/**
+ * This container pre-installs Chromium outside Playwright's own cache. Fall
+ * back to Playwright's resolution so the suite also runs on a plain machine
+ * (a CI runner, a contributor's laptop) after `playwright install chromium`.
+ */
+const PRESET = "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
+const EXEC = process.env.PW_CHROME ?? (existsSync(PRESET) ? PRESET : undefined);
 const SHOTS = "qa-screenshots";
 
 // The exact widths the requirements name, plus the shell breakpoints.
@@ -119,7 +125,7 @@ async function checkTouchTargets(page, label) {
 
 async function main() {
   mkdirSync(SHOTS, { recursive: true });
-  const browser = await chromium.launch({ executablePath: EXEC });
+  const browser = await chromium.launch(EXEC ? { executablePath: EXEC } : {});
 
   // A realistic phone: iPhone 14-class viewport, touch, mobile UA.
   const phone = await browser.newContext({

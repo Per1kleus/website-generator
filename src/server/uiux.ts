@@ -7,6 +7,7 @@ import { ARCHITECTURE_IDS } from "@/lib/architectures";
 import { contrastRatio, repairPalette } from "@/lib/contrast";
 import type { SiteKind, Theme } from "@/lib/site";
 import { generateJson, getState } from "./ollama";
+import { pythonBin } from "./runtime";
 import type { BusinessProfile } from "./research";
 
 const execFileAsync = promisify(execFile);
@@ -90,10 +91,10 @@ async function havePython(): Promise<boolean> {
       pythonOk = false;
       return false;
     }
-    await execFileAsync("python3", ["--version"], { timeout: 5000 });
+    await execFileAsync(pythonBin(), ["--version"], { timeout: 5000 });
     pythonOk = true;
   } catch {
-    console.warn("[uiux] python3 unavailable — skipping the design-intelligence stage.");
+    console.warn(`[uiux] ${pythonBin()} unavailable — skipping the design-intelligence stage.`);
     pythonOk = false;
   }
   return pythonOk;
@@ -262,7 +263,7 @@ export async function runSkill(q: SkillQuery): Promise<SkillDesignSystem | null>
 
   try {
     const { stdout } = await execFileAsync(
-      "python3",
+      pythonBin(),
       [
         SEARCH,
         q.query,
