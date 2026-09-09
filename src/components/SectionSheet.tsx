@@ -4,139 +4,176 @@ import { useState } from "react";
 import { BottomSheet, Button, Field, Select, TextArea, TextInput } from "./ui";
 import { IconPlus, IconSparkles, IconTrash } from "./icons";
 import type { AssetRef } from "./SectionEditor";
-import type { MenuCategory, Section } from "@/lib/site";
+import { localeInfo, type Locale } from "@/lib/locales";
+import { key, newId, SECTION_LABELS, type Section, type Site } from "@/lib/site";
 
 /**
- * Per-section editing (requirement 7). Every section type gets a purpose-built
- * form of plain, large, labelled controls in a bottom sheet — no inline
- * canvas editing, which is unusable with a fingertip.
+ * Per-section editing (requirements 7 and 25).
+ *
+ * Two kinds of field live side by side here and are deliberately kept apart:
+ *
+ *   text        edited for the language currently selected, written to the
+ *               i18n catalog for that locale only
+ *   structural  prices, links, phone numbers, image ids — shared by every
+ *               language and marked as such in the UI
+ *
+ * That distinction is what stops a creator "translating" a price, and what
+ * lets them fix the English copy without disturbing the Greek.
  */
 export function SectionSheet({
+  site,
   section,
+  locale,
   assets,
   onClose,
   onSave,
   onAskAi,
 }: {
+  site: Site;
   section: Section;
+  locale: Locale;
   assets: AssetRef[];
   onClose: () => void;
-  onSave: (s: Section) => void;
+  onSave: (next: { section: Section; strings: Record<string, string> }) => void;
   onAskAi: () => void;
 }) {
   const [draft, setDraft] = useState<Section>(() => structuredClone(section));
+  // Edits accumulate against the selected locale's catalog only.
+  const [strings, setStrings] = useState<Record<string, string>>(() => {
+    const catalog = site.i18n[locale]?.strings ?? {};
+    const fallback = site.i18n[site.meta.defaultLocale]?.strings ?? {};
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(catalog)) if (k.startsWith(`${section.id}.`)) out[k] = v;
+    // Show the default-language text as a starting point where a translation
+    // is missing, rather than an empty box.
+    for (const [k, v] of Object.entries(fallback)) {
+      if (k.startsWith(`${section.id}.`) && out[k] === undefined) out[k] = v;
+    }
+    return out;
+  });
 
-  // `props` is a discriminated union; the cast is contained to this one helper
-  // and every call site below is already narrowed by draft.type.
-  const setProp = (key: string, value: unknown) =>
-    setDraft((d) => ({ ...d, props: { ...d.props, [key]: value } }) as Section);
+  const get = (k: string) => strings[k] ?? "";
+  const set = (k: string, v: string) => setStrings((s) => ({ ...s, [k]: v }));
+
+  const sk = (field: string) => key.section(section.id, field);
+  const rk = (rowId: string, field: string) => key.row(section.id, rowId, field);
+
+  const info = localeInfo(locale);
+  const isTranslation = locale !== site.meta.defaultLocale;
+
+  /** Structural fields are shared across languages; say so, once. */
+  const SharedNote = () => (
+    <p className="mb-4 rounded-xl bg-elevated px-3 py-2 text-xs text-muted">
+      Prices, links and images below are shared by every language.
+    </p>
+  );
 
   return (
     <BottomSheet
       open
       onClose={onClose}
-      title={`Edit ${section.title.toLowerCase()}`}
+      title={`Edit ${SECTION_LABELS[section.type].toLowerCase()}`}
       footer={
         <div className="flex gap-2.5">
           <Button variant="secondary" size="lg" onClick={onAskAi} className="shrink-0">
             <IconSparkles size={18} />
             <span className="sr-only">Ask AI instead</span>
           </Button>
-          <Button size="lg" block onClick={() => onSave(draft)}>
+          <Button size="lg" block onClick={() => onSave({ section: draft, strings })}>
             Save
           </Button>
         </div>
       }
     >
+      {site.meta.locales.length > 1 && (
+        <p className="mb-4 rounded-xl bg-brand-soft px-3 py-2 text-xs font-medium text-brand">
+          Editing the {info.english} text. Other languages are untouched.
+        </p>
+      )}
+
       <Field label="Section name" hint="Shown in the website's navigation.">
         {({ id }) => (
-          <TextInput
-            id={id}
-            value={draft.title}
-            onChange={(e) => setDraft((d) => ({ ...d, title: e.target.value }))}
-            autoCapitalize="words"
-          />
+          <TextInput id={id} value={get(sk("title"))} onChange={(e) => set(sk("title"), e.target.value)} autoCapitalize="words" />
         )}
       </Field>
 
       {draft.type === "hero" && (
         <>
           <Field label="Eyebrow" hint="Small line above the headline. Optional.">
-            {({ id }) => (
-              <TextInput id={id} value={draft.props.eyebrow} onChange={(e) => setProp("eyebrow", e.target.value)} />
-            )}
+            {({ id }) => <TextInput id={id} value={get(sk("eyebrow"))} onChange={(e) => set(sk("eyebrow"), e.target.value)} />}
           </Field>
           <Field label="Headline" hint="Keep it under 8 words so it fits a phone.">
-            {({ id }) => (
-              <TextArea id={id} rows={2} value={draft.props.headline} onChange={(e) => setProp("headline", e.target.value)} />
-            )}
+            {({ id }) => <TextArea id={id} rows={2} value={get(sk("headline"))} onChange={(e) => set(sk("headline"), e.target.value)} />}
           </Field>
           <Field label="Subheadline">
-            {({ id }) => (
-              <TextArea id={id} rows={3} value={draft.props.subheadline} onChange={(e) => setProp("subheadline", e.target.value)} />
-            )}
+            {({ id }) => <TextArea id={id} rows={3} value={get(sk("subheadline"))} onChange={(e) => set(sk("subheadline"), e.target.value)} />}
           </Field>
           <Field label="Button label">
-            {({ id }) => (
-              <TextInput id={id} value={draft.props.ctaLabel} onChange={(e) => setProp("ctaLabel", e.target.value)} />
-            )}
+            {({ id }) => <TextInput id={id} value={get(sk("ctaLabel"))} onChange={(e) => set(sk("ctaLabel"), e.target.value)} />}
           </Field>
+          <SharedNote />
           <Field label="Button link" hint="A web address, tel: number, or mailto: address.">
             {({ id }) => (
               <TextInput id={id} inputMode="url" autoCapitalize="none" autoCorrect="off" spellCheck={false}
-                value={draft.props.ctaHref} onChange={(e) => setProp("ctaHref", e.target.value)} />
+                value={draft.ctaHref}
+                onChange={(e) => setDraft({ ...draft, ctaHref: e.target.value })} />
             )}
           </Field>
-          <ImagePicker
-            label="Hero image"
-            assets={assets}
-            value={draft.props.imageId}
-            onChange={(v) => setProp("imageId", v)}
-          />
+          <ImagePicker label="Hero image" assets={assets} value={draft.imageId}
+            onChange={(v) => setDraft({ ...draft, imageId: v })} />
         </>
       )}
 
       {draft.type === "about" && (
         <>
           <Field label="Heading">
-            {({ id }) => <TextInput id={id} value={draft.props.heading} onChange={(e) => setProp("heading", e.target.value)} />}
+            {({ id }) => <TextInput id={id} value={get(sk("heading"))} onChange={(e) => set(sk("heading"), e.target.value)} />}
           </Field>
           <Field label="Text" hint="Leave a blank line between paragraphs.">
-            {({ id }) => (
-              <TextArea id={id} rows={7} value={draft.props.body} onChange={(e) => setProp("body", e.target.value)} autoCapitalize="sentences" />
-            )}
+            {({ id }) => <TextArea id={id} rows={7} value={get(sk("body"))} onChange={(e) => set(sk("body"), e.target.value)} autoCapitalize="sentences" />}
           </Field>
-          <ListEditor
+          <RowEditor
             label="Highlights"
-            items={draft.props.highlights}
-            onChange={(v) => setProp("highlights", v)}
-            render={(value, set) => (
-              <TextInput value={value} onChange={(e) => set(e.target.value)} placeholder="Independent and local" />
+            rows={draft.highlights}
+            onAdd={() => setDraft({ ...draft, highlights: [...draft.highlights, { id: newId("hl") }] })}
+            onRemove={(rowId) => setDraft({ ...draft, highlights: draft.highlights.filter((h) => h.id !== rowId) })}
+            render={(row) => (
+              <TextInput value={get(rk(row.id, "text"))} onChange={(e) => set(rk(row.id, "text"), e.target.value)}
+                aria-label="Highlight" placeholder="Independent and local" />
             )}
-            empty=""
           />
-          <ImagePicker label="Image" assets={assets} value={draft.props.imageId} onChange={(v) => setProp("imageId", v)} />
+          <SharedNote />
+          <ImagePicker label="Image" assets={assets} value={draft.imageId}
+            onChange={(v) => setDraft({ ...draft, imageId: v })} />
         </>
       )}
 
       {draft.type === "services" && (
         <>
           <Field label="Heading">
-            {({ id }) => <TextInput id={id} value={draft.props.heading} onChange={(e) => setProp("heading", e.target.value)} />}
+            {({ id }) => <TextInput id={id} value={get(sk("heading"))} onChange={(e) => set(sk("heading"), e.target.value)} />}
           </Field>
           <Field label="Intro">
-            {({ id }) => <TextArea id={id} rows={2} value={draft.props.intro} onChange={(e) => setProp("intro", e.target.value)} />}
+            {({ id }) => <TextArea id={id} rows={2} value={get(sk("intro"))} onChange={(e) => set(sk("intro"), e.target.value)} />}
           </Field>
-          <ListEditor
+          <RowEditor
             label="Services"
-            items={draft.props.items}
-            onChange={(v) => setProp("items", v)}
-            empty={{ name: "", description: "", price: "" }}
-            render={(item, set) => (
+            rows={draft.items}
+            onAdd={() => setDraft({ ...draft, items: [...draft.items, { id: newId("svc"), price: "" }] })}
+            onRemove={(rowId) => setDraft({ ...draft, items: draft.items.filter((i) => i.id !== rowId) })}
+            render={(row) => (
               <div className="space-y-2">
-                <TextInput value={item.name} onChange={(e) => set({ ...item, name: e.target.value })} placeholder="Service name" />
-                <TextArea rows={2} value={item.description} onChange={(e) => set({ ...item, description: e.target.value })} placeholder="Short description" />
-                <TextInput value={item.price} onChange={(e) => set({ ...item, price: e.target.value })} placeholder="Price (optional)" inputMode="text" />
+                <TextInput value={get(rk(row.id, "name"))} onChange={(e) => set(rk(row.id, "name"), e.target.value)}
+                  aria-label="Service name" placeholder="Service name" />
+                <TextArea rows={2} value={get(rk(row.id, "description"))} onChange={(e) => set(rk(row.id, "description"), e.target.value)}
+                  aria-label="Description" placeholder="Short description" />
+                <TextInput value={row.price} aria-label="Price (shared by all languages)" placeholder="Price — shared by all languages"
+                  onChange={(e) =>
+                    setDraft({
+                      ...draft,
+                      items: draft.items.map((i) => (i.id === row.id ? { ...i, price: e.target.value } : i)),
+                    })
+                  } />
               </div>
             )}
           />
@@ -145,47 +182,71 @@ export function SectionSheet({
 
       {draft.type === "menu" && (
         <MenuEditor
-          categories={draft.props.categories}
-          heading={draft.props.heading}
-          note={draft.props.note}
-          onHeading={(v) => setProp("heading", v)}
-          onNote={(v) => setProp("note", v)}
-          onChange={(v) => setProp("categories", v)}
+          section={draft}
+          get={get}
+          set={set}
+          sk={sk}
+          onChange={(next) => setDraft(next)}
         />
       )}
 
       {draft.type === "gallery" && (
         <>
           <Field label="Heading">
-            {({ id }) => <TextInput id={id} value={draft.props.heading} onChange={(e) => setProp("heading", e.target.value)} />}
+            {({ id }) => <TextInput id={id} value={get(sk("heading"))} onChange={(e) => set(sk("heading"), e.target.value)} />}
           </Field>
           <GalleryPicker
             assets={assets}
-            selected={draft.props.imageIds}
-            onChange={(v) => setProp("imageIds", v)}
+            selected={draft.imageIds}
+            onChange={(v) => setDraft({ ...draft, imageIds: v })}
           />
+          {draft.imageIds.length > 0 && (
+            <fieldset className="mb-4">
+              <legend className="mb-1.5 text-sm font-semibold">
+                Alt text{isTranslation ? ` (${info.english})` : ""}
+              </legend>
+              <p className="mb-2 text-xs text-muted">
+                Describes each photo for screen readers. Translated per language.
+              </p>
+              <div className="space-y-2">
+                {draft.imageIds.map((imgId) => (
+                  <TextInput key={imgId} value={get(rk(imgId, "alt"))}
+                    onChange={(e) => set(rk(imgId, "alt"), e.target.value)}
+                    aria-label={`Alt text for ${assets.find((a) => a.id === imgId)?.filename ?? "image"}`}
+                    placeholder="The terrace at sunset" />
+                ))}
+              </div>
+            </fieldset>
+          )}
         </>
       )}
 
       {draft.type === "hours" && (
         <>
           <Field label="Heading">
-            {({ id }) => <TextInput id={id} value={draft.props.heading} onChange={(e) => setProp("heading", e.target.value)} />}
+            {({ id }) => <TextInput id={id} value={get(sk("heading"))} onChange={(e) => set(sk("heading"), e.target.value)} />}
           </Field>
-          <ListEditor
+          <RowEditor
             label="Days"
-            items={draft.props.rows}
-            onChange={(v) => setProp("rows", v)}
-            empty={{ day: "", hours: "" }}
-            render={(row, set) => (
+            rows={draft.rows}
+            onAdd={() => setDraft({ ...draft, rows: [...draft.rows, { id: newId("day"), hours: "" }] })}
+            onRemove={(rowId) => setDraft({ ...draft, rows: draft.rows.filter((r) => r.id !== rowId) })}
+            render={(row) => (
               <div className="flex gap-2">
-                <TextInput value={row.day} onChange={(e) => set({ ...row, day: e.target.value })} placeholder="Monday" />
-                <TextInput value={row.hours} onChange={(e) => set({ ...row, hours: e.target.value })} placeholder="9:00 – 18:00" />
+                <TextInput value={get(rk(row.id, "day"))} onChange={(e) => set(rk(row.id, "day"), e.target.value)}
+                  aria-label="Day" placeholder="Monday" />
+                <TextInput value={row.hours} aria-label="Hours (shared by all languages)" placeholder="9:00 – 18:00"
+                  onChange={(e) =>
+                    setDraft({
+                      ...draft,
+                      rows: draft.rows.map((r) => (r.id === row.id ? { ...r, hours: e.target.value } : r)),
+                    })
+                  } />
               </div>
             )}
           />
           <Field label="Note">
-            {({ id }) => <TextInput id={id} value={draft.props.note} onChange={(e) => setProp("note", e.target.value)} />}
+            {({ id }) => <TextInput id={id} value={get(sk("note"))} onChange={(e) => set(sk("note"), e.target.value)} />}
           </Field>
         </>
       )}
@@ -193,17 +254,19 @@ export function SectionSheet({
       {draft.type === "testimonials" && (
         <>
           <Field label="Heading">
-            {({ id }) => <TextInput id={id} value={draft.props.heading} onChange={(e) => setProp("heading", e.target.value)} />}
+            {({ id }) => <TextInput id={id} value={get(sk("heading"))} onChange={(e) => set(sk("heading"), e.target.value)} />}
           </Field>
-          <ListEditor
+          <RowEditor
             label="Quotes"
-            items={draft.props.items}
-            onChange={(v) => setProp("items", v)}
-            empty={{ quote: "", author: "" }}
-            render={(item, set) => (
+            rows={draft.items}
+            onAdd={() => setDraft({ ...draft, items: [...draft.items, { id: newId("tst") }] })}
+            onRemove={(rowId) => setDraft({ ...draft, items: draft.items.filter((i) => i.id !== rowId) })}
+            render={(row) => (
               <div className="space-y-2">
-                <TextArea rows={3} value={item.quote} onChange={(e) => set({ ...item, quote: e.target.value })} placeholder="What they said" />
-                <TextInput value={item.author} onChange={(e) => set({ ...item, author: e.target.value })} placeholder="Who said it" />
+                <TextArea rows={3} value={get(rk(row.id, "quote"))} onChange={(e) => set(rk(row.id, "quote"), e.target.value)}
+                  aria-label="Quote" placeholder="What they said" />
+                <TextInput value={get(rk(row.id, "author"))} onChange={(e) => set(rk(row.id, "author"), e.target.value)}
+                  aria-label="Who said it" placeholder="A regular" />
               </div>
             )}
           />
@@ -213,18 +276,19 @@ export function SectionSheet({
       {draft.type === "cta" && (
         <>
           <Field label="Heading">
-            {({ id }) => <TextInput id={id} value={draft.props.heading} onChange={(e) => setProp("heading", e.target.value)} />}
+            {({ id }) => <TextInput id={id} value={get(sk("heading"))} onChange={(e) => set(sk("heading"), e.target.value)} />}
           </Field>
           <Field label="Text">
-            {({ id }) => <TextArea id={id} rows={2} value={draft.props.body} onChange={(e) => setProp("body", e.target.value)} />}
+            {({ id }) => <TextArea id={id} rows={2} value={get(sk("body"))} onChange={(e) => set(sk("body"), e.target.value)} />}
           </Field>
           <Field label="Button label">
-            {({ id }) => <TextInput id={id} value={draft.props.ctaLabel} onChange={(e) => setProp("ctaLabel", e.target.value)} />}
+            {({ id }) => <TextInput id={id} value={get(sk("ctaLabel"))} onChange={(e) => set(sk("ctaLabel"), e.target.value)} />}
           </Field>
+          <SharedNote />
           <Field label="Button link">
             {({ id }) => (
               <TextInput id={id} inputMode="url" autoCapitalize="none" autoCorrect="off" spellCheck={false}
-                value={draft.props.ctaHref} onChange={(e) => setProp("ctaHref", e.target.value)} />
+                value={draft.ctaHref} onChange={(e) => setDraft({ ...draft, ctaHref: e.target.value })} />
             )}
           </Field>
         </>
@@ -233,32 +297,37 @@ export function SectionSheet({
       {draft.type === "contact" && (
         <>
           <Field label="Heading">
-            {({ id }) => <TextInput id={id} value={draft.props.heading} onChange={(e) => setProp("heading", e.target.value)} />}
+            {({ id }) => <TextInput id={id} value={get(sk("heading"))} onChange={(e) => set(sk("heading"), e.target.value)} />}
           </Field>
           <Field label="Address">
-            {({ id }) => <TextArea id={id} rows={2} value={draft.props.address} onChange={(e) => setProp("address", e.target.value)} />}
+            {({ id }) => <TextArea id={id} rows={2} value={get(sk("address"))} onChange={(e) => set(sk("address"), e.target.value)} />}
           </Field>
+          <Field label="Booking button label">
+            {({ id }) => <TextInput id={id} value={get(sk("bookingLabel"))} onChange={(e) => set(sk("bookingLabel"), e.target.value)} />}
+          </Field>
+          <SharedNote />
           <Field label="Phone" hint="Becomes a tap-to-call button.">
             {({ id }) => (
-              <TextInput id={id} type="tel" inputMode="tel" value={draft.props.phone} onChange={(e) => setProp("phone", e.target.value)} />
+              <TextInput id={id} type="tel" inputMode="tel" value={draft.phone}
+                onChange={(e) => setDraft({ ...draft, phone: e.target.value })} />
             )}
           </Field>
           <Field label="Email">
             {({ id }) => (
               <TextInput id={id} type="email" inputMode="email" autoCapitalize="none" autoCorrect="off" spellCheck={false}
-                value={draft.props.email} onChange={(e) => setProp("email", e.target.value)} />
+                value={draft.email} onChange={(e) => setDraft({ ...draft, email: e.target.value })} />
             )}
           </Field>
           <Field label="Google Maps link">
             {({ id }) => (
               <TextInput id={id} inputMode="url" autoCapitalize="none" autoCorrect="off" spellCheck={false}
-                value={draft.props.mapsUrl} onChange={(e) => setProp("mapsUrl", e.target.value)} />
+                value={draft.mapsUrl} onChange={(e) => setDraft({ ...draft, mapsUrl: e.target.value })} />
             )}
           </Field>
-          <Field label="Booking link" hint="Optional. Shows a 'Book now' button.">
+          <Field label="Booking link" hint="Optional.">
             {({ id }) => (
               <TextInput id={id} inputMode="url" autoCapitalize="none" autoCorrect="off" spellCheck={false}
-                value={draft.props.bookingUrl} onChange={(e) => setProp("bookingUrl", e.target.value)} />
+                value={draft.bookingUrl} onChange={(e) => setDraft({ ...draft, bookingUrl: e.target.value })} />
             )}
           </Field>
         </>
@@ -266,22 +335,26 @@ export function SectionSheet({
 
       {draft.type === "footer" && (
         <>
-          <Field label="Business name">
-            {({ id }) => <TextInput id={id} value={draft.props.businessName} onChange={(e) => setProp("businessName", e.target.value)} />}
-          </Field>
           <Field label="Tagline">
-            {({ id }) => <TextInput id={id} value={draft.props.tagline} onChange={(e) => setProp("tagline", e.target.value)} />}
+            {({ id }) => <TextInput id={id} value={get(sk("tagline"))} onChange={(e) => set(sk("tagline"), e.target.value)} />}
           </Field>
-          <ListEditor
+          <RowEditor
             label="Links"
-            items={draft.props.links}
-            onChange={(v) => setProp("links", v)}
-            empty={{ label: "", href: "" }}
-            render={(link, set) => (
+            rows={draft.links}
+            onAdd={() => setDraft({ ...draft, links: [...draft.links, { id: newId("lnk"), href: "" }] })}
+            onRemove={(rowId) => setDraft({ ...draft, links: draft.links.filter((l) => l.id !== rowId) })}
+            render={(row) => (
               <div className="flex gap-2">
-                <TextInput value={link.label} onChange={(e) => set({ ...link, label: e.target.value })} placeholder="Instagram" />
-                <TextInput value={link.href} onChange={(e) => set({ ...link, href: e.target.value })} placeholder="https://…"
-                  inputMode="url" autoCapitalize="none" autoCorrect="off" spellCheck={false} />
+                <TextInput value={get(rk(row.id, "label"))} onChange={(e) => set(rk(row.id, "label"), e.target.value)}
+                  aria-label="Link label" placeholder="Instagram" />
+                <TextInput value={row.href} aria-label="Link address (shared)" placeholder="https://…"
+                  inputMode="url" autoCapitalize="none" autoCorrect="off" spellCheck={false}
+                  onChange={(e) =>
+                    setDraft({
+                      ...draft,
+                      links: draft.links.map((l) => (l.id === row.id ? { ...l, href: e.target.value } : l)),
+                    })
+                  } />
               </div>
             )}
           />
@@ -291,63 +364,38 @@ export function SectionSheet({
   );
 }
 
-/* --------------------------- repeatable lists ---------------------------- */
+/* --------------------------- repeatable rows ----------------------------- */
 
-/**
- * Add/remove rows with generous targets. Reordering here is deliberately
- * arrow-based only — nested drag inside a scrolling sheet is a bad idea on a
- * touch screen because the two gestures fight each other.
- */
-function ListEditor<T>({
-  label,
-  items,
-  onChange,
-  render,
-  empty,
+function RowEditor<T extends { id: string }>({
+  label, rows, render, onAdd, onRemove,
 }: {
   label: string;
-  items: T[];
-  onChange: (items: T[]) => void;
-  render: (item: T, set: (v: T) => void) => React.ReactNode;
-  empty: T;
+  rows: T[];
+  render: (row: T) => React.ReactNode;
+  onAdd: () => void;
+  onRemove: (id: string) => void;
 }) {
   return (
     <fieldset className="mb-4">
       <legend className="mb-1.5 text-sm font-semibold">{label}</legend>
       <div className="space-y-2.5">
-        {items.map((item, i) => (
-          <div key={i} className="rounded-xl border border-line p-2.5">
-            {render(item, (v) => onChange(items.map((x, j) => (j === i ? v : x))))}
-            <div className="mt-2 flex gap-1">
-              <button
-                type="button"
-                onClick={() => onChange(items.filter((_, j) => j !== i))}
-                aria-label={`Remove item ${i + 1}`}
-                className="flex min-h-[var(--spacing-touch)] flex-1 items-center justify-center gap-1.5 rounded-lg text-xs font-semibold text-danger active:bg-elevated"
-              >
-                <IconTrash size={16} /> Remove
-              </button>
-              {i > 0 && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    const next = items.slice();
-                    [next[i - 1], next[i]] = [next[i], next[i - 1]];
-                    onChange(next);
-                  }}
-                  aria-label={`Move item ${i + 1} up`}
-                  className="flex min-h-[var(--spacing-touch)] flex-1 items-center justify-center rounded-lg text-xs font-semibold text-muted active:bg-elevated"
-                >
-                  Move up
-                </button>
-              )}
-            </div>
+        {rows.map((row, i) => (
+          <div key={row.id} className="rounded-xl border border-line p-2.5">
+            {render(row)}
+            <button
+              type="button"
+              onClick={() => onRemove(row.id)}
+              aria-label={`Remove item ${i + 1}`}
+              className="mt-2 flex min-h-[var(--spacing-touch)] w-full items-center justify-center gap-1.5 rounded-lg text-xs font-semibold text-danger active:bg-elevated"
+            >
+              <IconTrash size={16} /> Remove
+            </button>
           </div>
         ))}
       </div>
       <button
         type="button"
-        onClick={() => onChange([...items, structuredClone(empty)])}
+        onClick={onAdd}
         className="mt-2.5 flex min-h-[var(--spacing-touch)] w-full items-center justify-center gap-2 rounded-xl border border-dashed border-line text-sm font-semibold text-brand active:bg-elevated"
       >
         <IconPlus size={18} /> Add
@@ -359,104 +407,91 @@ function ListEditor<T>({
 /* ------------------------------ menu editor ------------------------------ */
 
 function MenuEditor({
-  categories, heading, note, onChange, onHeading, onNote,
+  section, get, set, sk, onChange,
 }: {
-  categories: MenuCategory[];
-  heading: string;
-  note: string;
-  onChange: (c: MenuCategory[]) => void;
-  onHeading: (v: string) => void;
-  onNote: (v: string) => void;
+  section: Extract<Section, { type: "menu" }>;
+  get: (k: string) => string;
+  set: (k: string, v: string) => void;
+  sk: (field: string) => string;
+  onChange: (next: Extract<Section, { type: "menu" }>) => void;
 }) {
-  const [openCat, setOpenCat] = useState<number | null>(0);
+  const [open, setOpen] = useState<number | null>(0);
+  const rk = (rowId: string, field: string) => key.row(section.id, rowId, field);
+  const ik = (catId: string, itemId: string, field: string) =>
+    key.menuItem(section.id, catId, itemId, field);
 
   return (
     <>
       <Field label="Heading">
-        {({ id }) => <TextInput id={id} value={heading} onChange={(e) => onHeading(e.target.value)} />}
+        {({ id }) => <TextInput id={id} value={get(sk("heading"))} onChange={(e) => set(sk("heading"), e.target.value)} />}
       </Field>
       <Field label="Note" hint="Allergens, service charge, anything guests should know.">
-        {({ id }) => <TextInput id={id} value={note} onChange={(e) => onNote(e.target.value)} />}
+        {({ id }) => <TextInput id={id} value={get(sk("note"))} onChange={(e) => set(sk("note"), e.target.value)} />}
       </Field>
 
       <fieldset className="mb-4">
         <legend className="mb-1.5 text-sm font-semibold">Categories</legend>
+        <p className="mb-2 text-xs text-muted">
+          Item names and descriptions are translated. Prices are shared by every language.
+        </p>
         {/* Accordion: a long menu is unusable as one flat form on a phone. */}
         <div className="space-y-2">
-          {categories.map((cat, ci) => {
-            const open = openCat === ci;
+          {section.categories.map((cat, ci) => {
+            const isOpen = open === ci;
             return (
-              <div key={ci} className="rounded-xl border border-line">
+              <div key={cat.id} className="rounded-xl border border-line">
                 <button
                   type="button"
-                  aria-expanded={open}
-                  onClick={() => setOpenCat(open ? null : ci)}
+                  aria-expanded={isOpen}
+                  onClick={() => setOpen(isOpen ? null : ci)}
                   className="flex min-h-[var(--spacing-touch-lg)] w-full items-center gap-2 px-3 text-left"
                 >
                   <span className="min-w-0 flex-1 truncate font-semibold">
-                    {cat.name || "Untitled category"}
+                    {get(rk(cat.id, "name")) || "Untitled category"}
                   </span>
-                  <span className="shrink-0 text-xs text-muted">
-                    {cat.items.length} items
-                  </span>
-                  <span aria-hidden="true" className="text-muted">
-                    {open ? "−" : "+"}
-                  </span>
+                  <span className="shrink-0 text-xs text-muted">{cat.items.length} items</span>
+                  <span aria-hidden="true" className="text-muted">{isOpen ? "−" : "+"}</span>
                 </button>
 
-                {open && (
+                {isOpen && (
                   <div className="border-t border-line p-2.5">
                     <TextInput
-                      value={cat.name}
-                      onChange={(e) =>
-                        onChange(categories.map((c, j) => (j === ci ? { ...c, name: e.target.value } : c)))
-                      }
+                      value={get(rk(cat.id, "name"))}
+                      onChange={(e) => set(rk(cat.id, "name"), e.target.value)}
                       placeholder="Category name"
                       aria-label="Category name"
                     />
                     <div className="mt-2.5 space-y-2.5">
-                      {cat.items.map((item, ii) => (
-                        <div key={ii} className="rounded-lg border border-line p-2.5">
-                          <TextInput
-                            value={item.name}
-                            aria-label="Item name"
-                            placeholder="Item name"
+                      {cat.items.map((item) => (
+                        <div key={item.id} className="rounded-lg border border-line p-2.5">
+                          <TextInput value={get(ik(cat.id, item.id, "name"))} aria-label="Item name" placeholder="Item name"
+                            onChange={(e) => set(ik(cat.id, item.id, "name"), e.target.value)} />
+                          <TextArea rows={2} className="mt-2" value={get(ik(cat.id, item.id, "description"))}
+                            aria-label="Item description" placeholder="Description"
+                            onChange={(e) => set(ik(cat.id, item.id, "description"), e.target.value)} />
+                          <TextInput className="mt-2" value={item.price}
+                            aria-label="Price (shared by all languages)" placeholder="Price — shared by all languages"
                             onChange={(e) =>
-                              onChange(categories.map((c, j) => j !== ci ? c : {
-                                ...c, items: c.items.map((it, k) => k === ii ? { ...it, name: e.target.value } : it),
-                              }))
-                            }
-                          />
-                          <TextArea
-                            rows={2}
-                            className="mt-2"
-                            value={item.description}
-                            aria-label="Item description"
-                            placeholder="Description"
-                            onChange={(e) =>
-                              onChange(categories.map((c, j) => j !== ci ? c : {
-                                ...c, items: c.items.map((it, k) => k === ii ? { ...it, description: e.target.value } : it),
-                              }))
-                            }
-                          />
-                          <TextInput
-                            className="mt-2"
-                            value={item.price}
-                            aria-label="Price"
-                            placeholder="Price"
-                            onChange={(e) =>
-                              onChange(categories.map((c, j) => j !== ci ? c : {
-                                ...c, items: c.items.map((it, k) => k === ii ? { ...it, price: e.target.value } : it),
-                              }))
-                            }
-                          />
+                              onChange({
+                                ...section,
+                                categories: section.categories.map((c) =>
+                                  c.id !== cat.id ? c : {
+                                    ...c,
+                                    items: c.items.map((it) => (it.id === item.id ? { ...it, price: e.target.value } : it)),
+                                  },
+                                ),
+                              })
+                            } />
                           <button
                             type="button"
-                            aria-label={`Remove ${item.name || "item"}`}
+                            aria-label={`Remove ${get(ik(cat.id, item.id, "name")) || "item"}`}
                             onClick={() =>
-                              onChange(categories.map((c, j) => j !== ci ? c : {
-                                ...c, items: c.items.filter((_, k) => k !== ii),
-                              }))
+                              onChange({
+                                ...section,
+                                categories: section.categories.map((c) =>
+                                  c.id !== cat.id ? c : { ...c, items: c.items.filter((it) => it.id !== item.id) },
+                                ),
+                              })
                             }
                             className="mt-2 flex min-h-[var(--spacing-touch)] w-full items-center justify-center gap-1.5 rounded-lg text-xs font-semibold text-danger active:bg-elevated"
                           >
@@ -469,9 +504,12 @@ function MenuEditor({
                     <button
                       type="button"
                       onClick={() =>
-                        onChange(categories.map((c, j) => j !== ci ? c : {
-                          ...c, items: [...c.items, { name: "", description: "", price: "", tags: [] }],
-                        }))
+                        onChange({
+                          ...section,
+                          categories: section.categories.map((c) =>
+                            c.id !== cat.id ? c : { ...c, items: [...c.items, { id: newId("itm"), price: "", tags: [] }] },
+                          ),
+                        })
                       }
                       className="mt-2.5 flex min-h-[var(--spacing-touch)] w-full items-center justify-center gap-2 rounded-lg border border-dashed border-line text-sm font-semibold text-brand"
                     >
@@ -480,8 +518,8 @@ function MenuEditor({
                     <button
                       type="button"
                       onClick={() => {
-                        onChange(categories.filter((_, j) => j !== ci));
-                        setOpenCat(null);
+                        onChange({ ...section, categories: section.categories.filter((c) => c.id !== cat.id) });
+                        setOpen(null);
                       }}
                       className="mt-1.5 flex min-h-[var(--spacing-touch)] w-full items-center justify-center rounded-lg text-xs font-semibold text-danger"
                     >
@@ -497,8 +535,8 @@ function MenuEditor({
         <button
           type="button"
           onClick={() => {
-            onChange([...categories, { name: "", items: [] }]);
-            setOpenCat(categories.length);
+            onChange({ ...section, categories: [...section.categories, { id: newId("cat"), items: [] }] });
+            setOpen(section.categories.length);
           }}
           className="mt-2.5 flex min-h-[var(--spacing-touch)] w-full items-center justify-center gap-2 rounded-xl border border-dashed border-line text-sm font-semibold text-brand"
         >
@@ -536,9 +574,7 @@ function ImagePicker({
         <Select id={id} value={value} onChange={(e) => onChange(e.target.value)}>
           <option value="">No image</option>
           {assets.map((a) => (
-            <option key={a.id} value={a.id}>
-              {a.alt || a.filename}
-            </option>
+            <option key={a.id} value={a.id}>{a.alt || a.filename}</option>
           ))}
         </Select>
       )}
@@ -573,25 +609,13 @@ function GalleryPicker({
               role="checkbox"
               aria-checked={on}
               aria-label={a.alt || a.filename}
-              onClick={() =>
-                onChange(on ? selected.filter((x) => x !== a.id) : [...selected, a.id])
-              }
-              className={`relative aspect-square overflow-hidden rounded-lg border-2 ${
-                on ? "border-brand" : "border-transparent"
-              }`}
+              onClick={() => onChange(on ? selected.filter((x) => x !== a.id) : [...selected, a.id])}
+              className={`relative aspect-square overflow-hidden rounded-lg border-2 ${on ? "border-brand" : "border-transparent"}`}
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={`/api/assets/${a.id}?w=200`}
-                alt=""
-                loading="lazy"
-                decoding="async"
-                className="size-full object-cover"
-              />
+              <img src={`/api/assets/${a.id}?w=200`} alt="" loading="lazy" decoding="async" className="size-full object-cover" />
               {on && (
-                <span className="absolute right-1 top-1 flex size-5 items-center justify-center rounded-full bg-brand text-xs text-on-brand">
-                  ✓
-                </span>
+                <span className="absolute right-1 top-1 flex size-5 items-center justify-center rounded-full bg-brand text-xs text-on-brand">✓</span>
               )}
             </button>
           );

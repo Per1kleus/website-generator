@@ -5,29 +5,32 @@ import { AppShell } from "./AppShell";
 import { AppBar, Banner, Button, Card, LinkButton, useToast } from "./ui";
 import { SectionSheet } from "./SectionSheet";
 import { AiSheet } from "./AiSheet";
+import { LocaleTabs } from "./LocaleTabs";
+import { IconDown, IconDrag, IconEye, IconEyeOff, IconPencil, IconSparkles, IconUp } from "./icons";
+import { localeInfo, type Locale } from "@/lib/locales";
 import {
-  IconDown, IconDrag, IconEye, IconEyeOff, IconPencil, IconSparkles, IconUp,
-} from "./icons";
-import {
-  SECTION_EMOJI, moveSection, reorderSections, sectionSummary,
+  SECTION_EMOJI, missingKeys, moveSection, reorderSections,
+  sectionSummary, sectionTitle,
   type Section, type Site,
 } from "@/lib/site";
 
 export type AssetRef = { id: string; filename: string; alt: string };
 
 /**
- * The mobile website editor (requirements 7 and 8).
+ * The mobile website editor (requirements 7, 8, 25).
  *
  * A vertical list of sections, each a full-width row with a large Edit target.
- * Tapping a row opens that section's form in a bottom sheet. There is no
- * canvas, no hover state, no side-by-side panel, and no interaction that needs
- * a mouse — every one of those is explicitly ruled out for phones.
+ * Tapping a row opens that section's form in a bottom sheet. No canvas, no
+ * hover state, no side-by-side panel, and no interaction needing a mouse.
  *
- * Reordering has two independent paths: press-and-hold drag via Pointer
- * Events (which work for touch, pen and mouse alike), and plain Move up /
- * Move down buttons. The buttons are not a fallback — they are a first-class
- * route, because drag is imprecise on a phone and impossible with a switch
- * device or a screen reader.
+ * Reordering has two independent paths: press-and-hold drag via Pointer Events
+ * (touch, pen and mouse alike), and Move up / Move down buttons. The buttons
+ * are not a fallback — drag is imprecise on a phone and impossible with a
+ * switch device or a screen reader.
+ *
+ * When more than one language is enabled a locale tab bar appears. It changes
+ * which language's *text* is being edited; it never changes structure, so the
+ * list of sections is identical in every language by construction.
  */
 export function SectionEditor({
   projectId,
@@ -41,6 +44,7 @@ export function SectionEditor({
   assets: AssetRef[];
 }) {
   const [site, setSite] = useState<Site>(initialSite);
+  const [locale, setLocale] = useState<Locale>(initialSite.meta.defaultLocale);
   const [editing, setEditing] = useState<Section | null>(null);
   const [aiOpen, setAiOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -107,13 +111,11 @@ export function SectionEditor({
 
   /* ------------------------- touch drag & drop -------------------------- */
 
-  const dragState = useRef<{ id: string; fromIndex: number } | null>(null);
+  const dragState = useRef<{ id: string } | null>(null);
 
-  function onPointerDown(e: React.PointerEvent, id: string, index: number) {
-    // Only start a drag from the handle, and only after the browser has
-    // decided this is not a scroll gesture.
+  function onPointerDown(e: React.PointerEvent, id: string) {
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-    dragState.current = { id, fromIndex: index };
+    dragState.current = { id };
     setDragId(id);
   }
 
@@ -122,10 +124,7 @@ export function SectionEditor({
     if (!state || !listRef.current) return;
     e.preventDefault();
 
-    // Find which row the pointer is currently over and reorder live.
-    const rows = Array.from(
-      listRef.current.querySelectorAll<HTMLElement>("[data-section-row]"),
-    );
+    const rows = Array.from(listRef.current.querySelectorAll<HTMLElement>("[data-section-row]"));
     const overIndex = rows.findIndex((row) => {
       const rect = row.getBoundingClientRect();
       return e.clientY >= rect.top && e.clientY <= rect.bottom;
@@ -149,6 +148,8 @@ export function SectionEditor({
     if (dirty) void persist(site, "Order saved");
   }
 
+  const missing = locale === site.meta.defaultLocale ? [] : missingKeys(site, locale);
+
   return (
     <AppShell>
       <AppBar
@@ -156,12 +157,7 @@ export function SectionEditor({
         subtitle={businessName}
         back={`/projects/${projectId}`}
         action={
-          <LinkButton
-            href={`/projects/${projectId}/preview`}
-            variant="ghost"
-            aria-label="Preview website"
-            className="shrink-0"
-          >
+          <LinkButton href={`/projects/${projectId}/preview`} variant="ghost" aria-label="Preview website" className="shrink-0">
             <IconEye size={20} />
           </LinkButton>
         }
@@ -171,10 +167,26 @@ export function SectionEditor({
       {warnings.length > 0 && (
         <Banner tone="warning">
           <ul className="list-disc space-y-0.5 pl-4">
-            {warnings.map((w) => (
-              <li key={w}>{w}</li>
-            ))}
+            {warnings.slice(0, 4).map((w) => <li key={w}>{w}</li>)}
           </ul>
+        </Banner>
+      )}
+
+      {site.meta.locales.length > 1 && (
+        <LocaleTabs
+          locales={site.meta.locales}
+          defaultLocale={site.meta.defaultLocale}
+          value={locale}
+          onChange={setLocale}
+          missingCount={(l) => (l === site.meta.defaultLocale ? 0 : missingKeys(site, l).length)}
+        />
+      )}
+
+      {missing.length > 0 && (
+        <Banner tone="info">
+          {missing.length} item{missing.length === 1 ? "" : "s"} not yet translated into{" "}
+          {localeInfo(locale).english}. Those fall back to{" "}
+          {localeInfo(site.meta.defaultLocale).english} on the live site.
         </Banner>
       )}
 
@@ -185,23 +197,21 @@ export function SectionEditor({
       <ul ref={listRef} className="space-y-2.5" aria-label="Website sections">
         {site.sections.map((section, index) => {
           const dragging = dragId === section.id;
+          const title = sectionTitle(site, locale, section);
           return (
             <li
               key={section.id}
               data-section-row
               className={`rounded-card border bg-surface transition-shadow ${
-                dragging
-                  ? "border-brand shadow-lg"
-                  : "border-line"
+                dragging ? "border-brand shadow-lg" : "border-line"
               } ${section.visible ? "" : "opacity-60"}`}
             >
               <div className="flex items-center gap-1 p-2.5">
-                {/* Drag handle. touch-action:none is what stops the browser
-                    stealing the gesture for page scrolling. */}
+                {/* touch-action:none stops the browser stealing the gesture. */}
                 <button
                   type="button"
-                  aria-label={`Reorder ${section.title}. Press and hold, then drag.`}
-                  onPointerDown={(e) => onPointerDown(e, section.id, index)}
+                  aria-label={`Reorder ${title}. Press and hold, then drag.`}
+                  onPointerDown={(e) => onPointerDown(e, section.id)}
                   onPointerMove={onPointerMove}
                   onPointerUp={onPointerUp}
                   onPointerCancel={onPointerUp}
@@ -216,18 +226,14 @@ export function SectionEditor({
                   onClick={() => setEditing(section)}
                   className="flex min-h-[var(--spacing-touch)] min-w-0 flex-1 items-center gap-2.5 rounded-lg px-1 text-left active:bg-elevated"
                 >
-                  <span aria-hidden="true" className="text-xl">
-                    {SECTION_EMOJI[section.type]}
-                  </span>
+                  <span aria-hidden="true" className="text-xl">{SECTION_EMOJI[section.type]}</span>
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate font-semibold">{section.title}</span>
+                    <span className="block truncate font-semibold">{title}</span>
                     <span className="block truncate text-xs text-muted">
-                      {section.visible ? sectionSummary(section) : "Hidden"}
+                      {section.visible ? sectionSummary(site, locale, section) : "Hidden"}
                     </span>
                   </span>
-                  <span className="shrink-0 text-brand">
-                    <IconPencil size={18} />
-                  </span>
+                  <span className="shrink-0 text-brand"><IconPencil size={18} /></span>
                 </button>
               </div>
 
@@ -237,7 +243,7 @@ export function SectionEditor({
                   type="button"
                   onClick={() => onMove(section.id, -1)}
                   disabled={index === 0}
-                  aria-label={`Move ${section.title} up`}
+                  aria-label={`Move ${title} up`}
                   className="flex min-h-[var(--spacing-touch)] flex-1 items-center justify-center gap-1.5 rounded-lg text-xs font-semibold text-muted active:bg-elevated disabled:opacity-35"
                 >
                   <IconUp size={16} /> Move up
@@ -246,7 +252,7 @@ export function SectionEditor({
                   type="button"
                   onClick={() => onMove(section.id, 1)}
                   disabled={index === site.sections.length - 1}
-                  aria-label={`Move ${section.title} down`}
+                  aria-label={`Move ${title} down`}
                   className="flex min-h-[var(--spacing-touch)] flex-1 items-center justify-center gap-1.5 rounded-lg text-xs font-semibold text-muted active:bg-elevated disabled:opacity-35"
                 >
                   <IconDown size={16} /> Move down
@@ -254,7 +260,7 @@ export function SectionEditor({
                 <button
                   type="button"
                   onClick={() => onToggleVisible(section.id)}
-                  aria-label={`${section.visible ? "Hide" : "Show"} ${section.title}`}
+                  aria-label={`${section.visible ? "Hide" : "Show"} ${title}`}
                   className="flex min-h-[var(--spacing-touch)] flex-1 items-center justify-center gap-1.5 rounded-lg text-xs font-semibold text-muted active:bg-elevated"
                 >
                   {section.visible ? <IconEyeOff size={16} /> : <IconEye size={16} />}
@@ -268,45 +274,42 @@ export function SectionEditor({
 
       {dirty && (
         <Card className="mt-4">
-          <p className="mb-3 text-sm text-muted">
-            You have unsaved changes.
-          </p>
-          <Button block size="lg" loading={saving} onClick={() => persist(site)}>
-            Save changes
-          </Button>
+          <p className="mb-3 text-sm text-muted">You have unsaved changes.</p>
+          <Button block size="lg" loading={saving} onClick={() => persist(site)}>Save changes</Button>
         </Card>
       )}
 
-      {/* AI entry point as a sticky bar rather than a floating button: a FAB
-          would sit on top of the section rows' own controls while scrolling,
-          and covering a control is not acceptable on a touch screen. The bar
-          reserves its own space, so nothing is ever obscured. */}
+      {/* Sticky bar rather than a floating button: a FAB would cover the
+          section rows' own controls while scrolling. */}
       <div
         className="fixed inset-x-0 z-40 border-t border-line bg-canvas/95 px-4 pt-2.5 backdrop-blur-lg md:pl-60"
-        style={{
-          bottom: "calc(var(--bottomnav-h) + var(--safe-bottom))",
-          paddingBottom: "0.625rem",
-        }}
+        style={{ bottom: "calc(var(--bottomnav-h) + var(--safe-bottom))", paddingBottom: "0.625rem" }}
       >
         <div className="mx-auto max-w-3xl lg:max-w-5xl">
           <Button block size="lg" onClick={() => setAiOpen(true)}>
-            <IconSparkles size={20} />
-            Ask AI to edit
+            <IconSparkles size={20} /> Ask AI to edit
           </Button>
         </div>
       </div>
-      {/* Spacer matching the sticky bar so the last row always scrolls clear. */}
       <div aria-hidden="true" className="h-24" />
 
       {editing && (
         <SectionSheet
+          site={site}
           section={editing}
+          locale={locale}
           assets={assets}
           onClose={() => setEditing(null)}
-          onSave={(updated) => {
-            const next = {
+          onSave={({ section, strings }) => {
+            const catalog = site.i18n[locale] ?? { strings: {}, seo: site.i18n[site.meta.defaultLocale].seo };
+            const next: Site = {
               ...site,
-              sections: site.sections.map((s) => (s.id === updated.id ? updated : s)),
+              sections: site.sections.map((s) => (s.id === section.id ? section : s)),
+              i18n: {
+                ...site.i18n,
+                // Only the selected locale's catalog is touched.
+                [locale]: { ...catalog, strings: { ...catalog.strings, ...strings } },
+              },
             };
             setEditing(null);
             applyLocal(next);
@@ -322,11 +325,14 @@ export function SectionEditor({
       <AiSheet
         open={aiOpen}
         projectId={projectId}
+        locale={locale}
+        locales={site.meta.locales}
         focusSectionId={editing?.id}
         onClose={() => setAiOpen(false)}
         onApplied={(next, summary) => {
           setSite(next);
           setDirty(false);
+          if (!next.meta.locales.includes(locale)) setLocale(next.meta.defaultLocale);
           toast(summary);
         }}
       />

@@ -3,9 +3,9 @@ import { getProject, getVersionSite } from "@/server/projects";
 import { renderSite } from "@/lib/render";
 
 /**
- * Serves the real generated website as HTML, for the preview iframe.
- * This is the actual artefact the user will export and deploy — the preview
- * is never a re-implementation of the design in React.
+ * Serves the real generated website as HTML for the preview iframe.
+ * This is the exact artefact that gets exported and deployed — the preview is
+ * never a React re-implementation of the design.
  */
 export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }) {
   const user = await getCurrentUser();
@@ -15,18 +15,27 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
   const project = getProject(id, user.id);
   if (!project) return new Response("Not found", { status: 404 });
 
-  const versionId = new URL(req.url).searchParams.get("version");
+  const params = new URL(req.url).searchParams;
+  const versionId = params.get("version");
   const site = versionId ? getVersionSite(versionId, id) : project.site;
   if (!site) return new Response("This project has not been generated yet.", { status: 404 });
 
-  const html = renderSite(site, { assetUrl: (assetId) => `/api/assets/${assetId}` });
+  const requested = params.get("locale") ?? "";
+  const locale = site.meta.locales.includes(requested) ? requested : site.meta.defaultLocale;
+
+  const html = renderSite(site, {
+    locale,
+    assetUrl: (assetId) => `/api/assets/${assetId}`,
+    // Inside the preview, switching language reloads this same endpoint, so
+    // the switcher is exercised for real rather than mocked.
+    localeHref: (l) =>
+      `/api/projects/${id}/render?locale=${encodeURIComponent(l)}${versionId ? `&version=${encodeURIComponent(versionId)}` : ""}`,
+  });
 
   return new Response(html, {
     headers: {
       "Content-Type": "text/html; charset=utf-8",
       "Cache-Control": "no-store",
-      // The preview runs in a sandboxed iframe; belt and braces against the
-      // generated page being framed anywhere else.
       "X-Content-Type-Options": "nosniff",
     },
   });

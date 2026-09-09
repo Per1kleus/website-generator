@@ -1,18 +1,18 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
-import { db } from "./db";
-import { generateSite, type GenerationInput } from "./generator";
 import { GENERATION_STEPS, type Site } from "@/lib/site";
+import { db } from "./db";
+import { runGeneration, type GenerationInput } from "./generator";
+import { validateSite, type Finding } from "./validate";
 
 /**
  * Generation runs in the server process, not in the browser tab.
  *
- * Requirement 5: "The generation process must continue if the user temporarily
- * leaves the application." The route handler starts the job and returns
- * immediately; the async work keeps running in the Node process and writes
- * every state change to SQLite. When the user comes back — from a locked
- * phone, a different tab, or a cold app launch — the progress screen reads the
- * real state out of the database rather than replaying a client-side animation.
+ * Requirement 5: generation must continue if the user temporarily leaves the
+ * application. The route handler starts the job and returns immediately; the
+ * async work keeps running and writes every state change to SQLite, so a user
+ * returning from a locked phone reads real backend state rather than a
+ * restarted animation.
  */
 
 export type JobStep = {
@@ -34,10 +34,7 @@ export type Job = {
   updated_at: number;
 };
 
-const GENERATE_STEPS: JobStep[] = GENERATION_STEPS.map((s) => ({
-  ...s,
-  status: "pending" as const,
-}));
+const GENERATE_STEPS: JobStep[] = GENERATION_STEPS.map((s) => ({ ...s, status: "pending" as const }));
 
 type JobRow = Omit<Job, "steps"> & { steps: string };
 
@@ -69,19 +66,27 @@ function writeJob(id: string, patch: Partial<Omit<Job, "id" | "steps">> & { step
   db.prepare(`UPDATE jobs SET ${fields.join(", ")} WHERE id = ?`).run(...values);
 }
 
-/** Marks one step done and the next one active, recomputing overall progress. */
-function advance(id: string, doneKey: string, nextKey: string | null, message: string) {
-  const job = getJob(id);
+/**
+ * Marks every step before `stageKey` done, `stageKey` active, and recomputes
+ * progress. Driving it from the stage name means the pipeline reports where it
+ * genuinely is, even when a stage is skipped (a single-language site skips
+ * translation, so that step completes immediately rather than lying).
+ */
+function reportStage(jobId: string, stageKey: string, message: string) {
+  const job = getJob(jobId);
   if (!job) return;
-  const steps = job.steps.map((s) => {
-    if (s.key === doneKey) return { ...s, status: "done" as const };
-    if (s.key === nextKey) return { ...s, status: "active" as const };
-    return s;
-  });
-  const done = steps.filter((s) => s.status === "done").length;
-  writeJob(id, {
+  const index = job.steps.findIndex((s) => s.key === stageKey);
+  if (index < 0) {
+    writeJob(jobId, { message });
+    return;
+  }
+  const steps = job.steps.map((s, i) => ({
+    ...s,
+    status: i < index ? ("done" as const) : i === index ? ("active" as const) : s.status,
+  }));
+  writeJob(jobId, {
     steps,
-    progress: Math.round((done / steps.length) * 100),
+    progress: Math.round((index / steps.length) * 100),
     message,
   });
 }
@@ -89,51 +94,44 @@ function advance(id: string, doneKey: string, nextKey: string | null, message: s
 export function startGeneration(projectId: string, input: GenerationInput): Job {
   const id = randomUUID();
   const now = Date.now();
-  const steps = GENERATE_STEPS.map((s, i) =>
-    i === 0 ? { ...s, status: "active" as const } : s,
-  );
+  const steps = GENERATE_STEPS.map((s, i) => (i === 0 ? { ...s, status: "active" as const } : s));
 
   db.prepare(
     `INSERT INTO jobs (id, project_id, kind, status, steps, progress, message, created_at, updated_at)
      VALUES (?, ?, 'generate', 'running', ?, 0, ?, ?, ?)`,
   ).run(id, projectId, JSON.stringify(steps), "Looking up your business", now, now);
 
-  db.prepare("UPDATE projects SET status = 'generating', updated_at = ? WHERE id = ?").run(
-    now,
-    projectId,
-  );
+  db.prepare("UPDATE projects SET status = 'generating', updated_at = ? WHERE id = ?").run(now, projectId);
 
   // Intentionally not awaited: the HTTP response returns straight away and the
   // work continues in the background. Every failure path is handled inside.
-  void runGeneration(id, projectId, input);
+  void run(id, projectId, input);
 
   return getJob(id)!;
 }
 
-async function runGeneration(jobId: string, projectId: string, input: GenerationInput) {
-  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+async function run(jobId: string, projectId: string, input: GenerationInput) {
   try {
-    // Each step is a real checkpoint the progress screen can report truthfully.
-    await pause(400);
-    advance(jobId, "research", "brand", "Analysing the brand");
-
-    await pause(400);
-    advance(jobId, "brand", "identity", "Creating the visual identity");
-
-    await pause(300);
-    advance(jobId, "identity", "build", "Writing and building your website");
-
-    const { site, usedAi } = await generateSite(input, (msg) => {
-      writeJob(jobId, { message: msg });
+    const { site, profile, identity, usedAi } = await runGeneration(input, (stage, message) => {
+      reportStage(jobId, stage, message);
     });
 
-    advance(jobId, "build", "qa", "Running quality checks");
-    const warnings = qaCheck(site);
-    await pause(300);
+    reportStage(jobId, "validate", "Running validation");
+    const findings = validateSite(site, profile);
+    const errors = findings.filter((f) => f.level === "error");
 
     const now = Date.now();
-    db.prepare("UPDATE projects SET site = ?, status = 'ready', updated_at = ? WHERE id = ?").run(
+    db.prepare(
+      `UPDATE projects
+          SET site = ?, status = 'ready', business_profile = ?, design_system = ?,
+              default_locale = ?, locales = ?, updated_at = ?
+        WHERE id = ?`,
+    ).run(
       JSON.stringify(site),
+      JSON.stringify(profile),
+      JSON.stringify(identity),
+      site.meta.defaultLocale,
+      JSON.stringify(site.meta.locales),
       now,
       projectId,
     );
@@ -146,8 +144,8 @@ async function runGeneration(jobId: string, projectId: string, input: Generation
       status: "done",
       progress: 100,
       steps: (job?.steps ?? []).map((s) => ({ ...s, status: "done" as const })),
-      message: warnings.length
-        ? `Ready — ${warnings.length} thing${warnings.length === 1 ? "" : "s"} to review`
+      message: errors.length
+        ? `Ready — ${errors.length} thing${errors.length === 1 ? "" : "s"} need attention`
         : usedAi
           ? "Your website is ready"
           : "Your website is ready (starter content)",
@@ -170,30 +168,9 @@ async function runGeneration(jobId: string, projectId: string, input: Generation
   }
 }
 
-/** Mobile-focused sanity checks on the finished document (requirement 24). */
+/** Kept as the shared entry point used by API routes and the project screen. */
 export function qaCheck(site: Site): string[] {
-  const warnings: string[] = [];
-  const visible = site.sections.filter((s) => s.visible);
-
-  if (!visible.length) warnings.push("The site has no visible sections.");
-  if (!visible.some((s) => s.type === "contact")) {
-    warnings.push("No contact section — visitors on a phone cannot reach the business.");
-  }
-
-  for (const s of visible) {
-    if (s.type === "hero") {
-      // Long headlines are the single most common way a design breaks at 320px.
-      if (s.props.headline.length > 60) {
-        warnings.push("The hero headline is long and may wrap awkwardly on small phones.");
-      }
-      if (!s.props.ctaLabel) warnings.push("The hero has no call-to-action button.");
-    }
-    if (s.type === "menu" && !s.props.categories.length) {
-      warnings.push("The menu section is empty.");
-    }
-    if (s.type === "gallery" && !s.props.imageIds.length) {
-      warnings.push("The gallery is visible but has no images.");
-    }
-  }
-  return warnings;
+  return validateSite(site).map((f) => f.message);
 }
+
+export type { Finding };

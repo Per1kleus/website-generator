@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { AppShell } from "./AppShell";
 import { AppBar, LinkButton } from "./ui";
 import { IconDesktop, IconExternal, IconPhone, IconTablet } from "./icons";
+import { localeInfo, type Locale } from "@/lib/locales";
 
 /**
  * The mobile website preview (requirement 6).
@@ -29,16 +30,22 @@ const DEVICES: { id: Device; label: string; width: number; height: number; Icon:
 export function DevicePreview({
   projectId,
   businessName,
+  locales,
+  defaultLocale,
 }: {
   projectId: string;
   businessName: string;
+  locales: Locale[];
+  defaultLocale: Locale;
 }) {
   const [device, setDevice] = useState<Device>("mobile");
+  const [locale, setLocale] = useState<Locale>(defaultLocale);
   const [scale, setScale] = useState(1);
   const [nonce, setNonce] = useState(0);
   const stageRef = useRef<HTMLDivElement>(null);
 
   const spec = DEVICES.find((d) => d.id === device)!;
+  const src = `/api/projects/${projectId}/render?locale=${encodeURIComponent(locale)}`;
 
   // On a phone, "mobile" means the site fills the available width at 1:1 — no
   // scaling, no device chrome, no letterboxing. Anything wider gets scaled to
@@ -70,7 +77,7 @@ export function DevicePreview({
         back={`/projects/${projectId}`}
         action={
           <a
-            href={`/api/projects/${projectId}/render`}
+            href={src}
             target="_blank"
             rel="noopener noreferrer"
             aria-label="Open the website in a new tab"
@@ -109,9 +116,35 @@ export function DevicePreview({
         })}
       </div>
 
+      {/* Language selector: previews the real per-language document, which is
+          what a visitor gets — not a client-side text swap. */}
+      {locales.length > 1 && (
+        <div role="radiogroup" aria-label="Preview language" className="snap-rail no-scrollbar -mx-4 mb-3 px-4">
+          {locales.map((l) => {
+            const info = localeInfo(l);
+            const active = l === locale;
+            return (
+              <button
+                key={l}
+                type="button"
+                role="radio"
+                aria-checked={active}
+                onClick={() => setLocale(l)}
+                className={`flex min-h-[var(--spacing-touch)] items-center gap-2 whitespace-nowrap rounded-full border px-4 text-sm font-semibold ${
+                  active ? "border-brand bg-brand-soft text-brand" : "border-line bg-surface text-muted"
+                }`}
+              >
+                <span aria-hidden="true">{info.flag}</span> {info.english}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       <p className="mb-3 text-center text-xs text-muted">
         {spec.width}px viewport
         {scale < 0.999 && ` · shown at ${Math.round(scale * 100)}%`}
+        {locales.length > 1 && ` · ${localeInfo(locale).english}`}
       </p>
 
       <div ref={stageRef} className="w-full">
@@ -125,9 +158,9 @@ export function DevicePreview({
           className="mx-auto rounded-card border border-line bg-white"
         >
           <iframe
-            key={`${device}-${nonce}`}
-            title={`${businessName} preview at ${spec.width} pixels wide`}
-            src={`/api/projects/${projectId}/render`}
+            key={`${device}-${locale}-${nonce}`}
+            title={`${businessName} preview in ${localeInfo(locale).english} at ${spec.width} pixels wide`}
+            src={src}
             // Allow the generated page's own scripts/forms but keep it firmly
             // out of this app's origin and away from top-level navigation.
             sandbox="allow-scripts allow-same-origin allow-popups allow-forms"

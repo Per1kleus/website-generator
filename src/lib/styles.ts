@@ -1,9 +1,13 @@
+import { architecture } from "./architectures";
 import type { LayoutDensity, SiteKind, Theme } from "./site";
 
 /**
- * Style presets, shared by the creation wizard (client) and the generator
- * (server). Every palette below was checked for AA contrast between `text`
- * and `bg`, and between `bg` and `primary` used as a button fill.
+ * Colour palettes and creator-facing style presets.
+ *
+ * A preset is a *starting point* the creator can pick in the wizard; the
+ * generator's identity analysis may override it entirely once it has looked at
+ * the real business. Every pair below clears WCAG AA for body text on its own
+ * background.
  */
 export const PALETTES: Record<string, Theme["colors"]> = {
   indigo:   { primary: "#4338ca", secondary: "#1e1b4b", accent: "#f59e0b", bg: "#ffffff", text: "#16161d" },
@@ -14,17 +18,28 @@ export const PALETTES: Record<string, Theme["colors"]> = {
   charcoal: { primary: "#111827", secondary: "#374151", accent: "#d97706", bg: "#fafafa", text: "#111827" },
   sand:     { primary: "#92400e", secondary: "#451a03", accent: "#0369a1", bg: "#fffcf5", text: "#1f1710" },
   rose:     { primary: "#be185d", secondary: "#500724", accent: "#0d9488", bg: "#fffafc", text: "#20141a" },
+  olive:    { primary: "#4d7c0f", secondary: "#1a2e05", accent: "#b45309", bg: "#fcfdf7", text: "#1a1f12" },
+  slate:    { primary: "#334155", secondary: "#0f172a", accent: "#0891b2", bg: "#f8fafc", text: "#0f172a" },
+  terracotta: { primary: "#9a3412", secondary: "#431407", accent: "#0f766e", bg: "#fffaf6", text: "#231510" },
+  midnight: { primary: "#1e3a8a", secondary: "#0c1633", accent: "#eab308", bg: "#f7f9ff", text: "#111827" },
 };
 
+/**
+ * Creator presets. Each names a palette *and* a design architecture, so
+ * picking "Elegant" really does produce a different composition, not just
+ * different colours.
+ */
 export const STYLE_PRESETS = {
-  minimal: { palette: "charcoal", heading: "grotesk", body: "system",  layout: "minimal"  as LayoutDensity, radius: 6 },
-  warm:    { palette: "sand",     heading: "serif",   body: "system",  layout: "balanced" as LayoutDensity, radius: 14 },
-  bold:    { palette: "ember",    heading: "grotesk", body: "grotesk", layout: "balanced" as LayoutDensity, radius: 4 },
-  elegant: { palette: "plum",     heading: "serif",   body: "serif",   layout: "minimal"  as LayoutDensity, radius: 2 },
-  fresh:   { palette: "forest",   heading: "rounded", body: "system",  layout: "balanced" as LayoutDensity, radius: 18 },
-  coastal: { palette: "ocean",    heading: "rounded", body: "system",  layout: "balanced" as LayoutDensity, radius: 16 },
-  classic: { palette: "indigo",   heading: "system",  body: "system",  layout: "balanced" as LayoutDensity, radius: 12 },
-  vibrant: { palette: "rose",     heading: "grotesk", body: "system",  layout: "dense"    as LayoutDensity, radius: 20 },
+  minimal:  { palette: "charcoal",   architecture: "minimal",          layout: "minimal"  as LayoutDensity },
+  warm:     { palette: "sand",       architecture: "mediterranean",    layout: "balanced" as LayoutDensity },
+  bold:     { palette: "ember",      architecture: "brutalist",        layout: "balanced" as LayoutDensity },
+  elegant:  { palette: "plum",       architecture: "luxury",           layout: "minimal"  as LayoutDensity },
+  fresh:    { palette: "olive",      architecture: "organic",          layout: "balanced" as LayoutDensity },
+  coastal:  { palette: "ocean",      architecture: "image-first",      layout: "balanced" as LayoutDensity },
+  classic:  { palette: "indigo",     architecture: "classic",          layout: "balanced" as LayoutDensity },
+  vibrant:  { palette: "rose",       architecture: "experimental",     layout: "dense"    as LayoutDensity },
+  editorial:{ palette: "slate",      architecture: "editorial",        layout: "balanced" as LayoutDensity },
+  crafted:  { palette: "terracotta", architecture: "typography-first", layout: "minimal"  as LayoutDensity },
 } as const;
 
 export type StylePreset = keyof typeof STYLE_PRESETS;
@@ -38,12 +53,14 @@ export const STYLE_OPTIONS: {
   [
     ["minimal", "Minimal", "Quiet, spacious"],
     ["warm", "Warm", "Friendly, inviting"],
-    ["bold", "Bold", "High contrast"],
-    ["elegant", "Elegant", "Refined, editorial"],
-    ["fresh", "Fresh", "Light and natural"],
-    ["coastal", "Coastal", "Airy and open"],
-    ["classic", "Classic", "Trusted and clear"],
+    ["bold", "Bold", "Raw, high contrast"],
+    ["elegant", "Elegant", "Refined, premium"],
+    ["fresh", "Fresh", "Natural, soft"],
+    ["coastal", "Coastal", "Photography-led"],
+    ["classic", "Classic", "Trusted, clear"],
     ["vibrant", "Vibrant", "Playful, energetic"],
+    ["editorial", "Editorial", "Magazine-like"],
+    ["crafted", "Crafted", "Typographic"],
   ] as const
 ).map(([id, label, hint]) => {
   const p = PALETTES[STYLE_PRESETS[id].palette];
@@ -52,11 +69,16 @@ export const STYLE_OPTIONS: {
 
 export function themeFor(style: string, kind: SiteKind): Theme {
   const preset = STYLE_PRESETS[style as StylePreset] ?? STYLE_PRESETS.classic;
+  // A digital menu overrides the architecture: the guest wants prices, and
+  // menu-first is the only composition that puts them first.
+  const archId = kind === "menu" ? "menu-first" : preset.architecture;
+  const arch = architecture(archId);
+
   return {
     colors: { ...PALETTES[preset.palette] },
-    fonts: { heading: preset.heading, body: preset.body },
-    // A digital menu is always dense: guests want prices on screen, not air.
+    fonts: { ...arch.fonts },
     layout: kind === "menu" ? "dense" : preset.layout,
-    radius: preset.radius,
+    radius: arch.radius,
+    architecture: archId,
   };
 }

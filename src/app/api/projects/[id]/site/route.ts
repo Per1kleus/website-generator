@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/server/auth";
 import { getProject, updateProjectSite } from "@/server/projects";
-import { validateSite } from "@/server/ai-edit";
-import { qaCheck } from "@/server/jobs";
+import { validateSiteDoc } from "@/server/ai-edit";
+import { validateSite } from "@/server/validate";
 import type { Site } from "@/lib/site";
 
 export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }) {
@@ -29,8 +29,8 @@ export async function PUT(req: Request, ctx: { params: Promise<{ id: string }> }
 
   // Run the same validation the AI path uses: anything malformed falls back to
   // the stored document rather than corrupting the project.
-  const site = validateSite(body.site, project.site);
+  const site = validateSiteDoc(body.site, project.site);
   updateProjectSite(id, user.id, site);
 
-  return NextResponse.json({ ok: true, site, warnings: qaCheck(site) });
+  return NextResponse.json({ ok: true, site, warnings: validateSite(site).map((f) => f.message) });
 }

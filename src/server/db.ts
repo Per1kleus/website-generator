@@ -24,6 +24,7 @@ function open(): Database.Database {
   handle.pragma("journal_mode = WAL");
   handle.pragma("foreign_keys = ON");
   migrate(handle);
+  addColumns(handle);
   return handle;
 }
 
@@ -62,6 +63,14 @@ function migrate(handle: Database.Database) {
       status        TEXT NOT NULL DEFAULT 'draft',
       created_at    INTEGER NOT NULL,
       updated_at    INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS project_locales (
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      locale     TEXT NOT NULL,
+      is_default INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY (project_id, locale)
     );
     CREATE INDEX IF NOT EXISTS projects_user ON projects(user_id, updated_at DESC);
 
@@ -116,6 +125,34 @@ function migrate(handle: Database.Database) {
     CREATE INDEX IF NOT EXISTS deployments_project ON deployments(project_id, created_at DESC);
     CREATE UNIQUE INDEX IF NOT EXISTS deployments_slug ON deployments(slug);
   `);
+}
+
+/**
+ * Additive column migrations.
+ *
+ * Existing installs must keep working, so every column is added in place with
+ * a default rather than by recreating the table. ALTER TABLE ADD COLUMN throws
+ * if the column is already there, which is the cheapest "if not exists" SQLite
+ * offers.
+ */
+const COLUMNS: [table: string, column: string, ddl: string][] = [
+  ["projects", "logo_asset_id", "TEXT NOT NULL DEFAULT ''"],
+  ["projects", "default_locale", "TEXT NOT NULL DEFAULT 'en'"],
+  ["projects", "locales", "TEXT NOT NULL DEFAULT '[\"en\"]'"],
+  ["projects", "design_notes", "TEXT NOT NULL DEFAULT ''"],
+  ["projects", "business_profile", "TEXT"],
+  ["projects", "design_system", "TEXT"],
+  ["projects", "design_answers", "TEXT NOT NULL DEFAULT '{}'"],
+  ["assets", "role", "TEXT NOT NULL DEFAULT 'photo'"],
+  ["assets", "has_alpha", "INTEGER NOT NULL DEFAULT 0"],
+];
+
+function addColumns(handle: Database.Database) {
+  for (const [table, column, ddl] of COLUMNS) {
+    const existing = handle.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+    if (existing.some((c) => c.name === column)) continue;
+    handle.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${ddl}`);
+  }
 }
 
 function getDb(): Database.Database {

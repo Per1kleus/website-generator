@@ -3,9 +3,9 @@ import { randomUUID } from "node:crypto";
 import { copyFile, mkdir, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
-import { db, UPLOAD_DIR } from "./db";
-import { renderSite } from "@/lib/render";
+import { db } from "./db";
 import type { Site } from "@/lib/site";
+import { buildBundle } from "./bundle";
 
 /**
  * Deployment from a phone (requirement 13).
@@ -141,33 +141,35 @@ async function runDeployment(
     log(id, "Preparing files", "preparing");
     await pause(300);
 
-    const html = renderSite(site, { assetUrl: (assetId) => `images/${assetId}.webp` });
+    // The public base URL is known here, so every page gets a real canonical
+    // and real hreflang links rather than relative guesses.
+    const siteBase = `${origin.replace(/\/$/, "")}/s/${slug}`;
+    const bundle = buildBundle(site, siteBase);
 
     log(id, "Building the site", "building");
     const target = path.join(PUBLISH_DIR, slug);
     await rm(target, { recursive: true, force: true });
-    await mkdir(path.join(target, "images"), { recursive: true });
-    await writeFile(path.join(target, "index.html"), html, "utf8");
+    await mkdir(target, { recursive: true });
 
-    const imageIds = new Set<string>();
-    for (const section of site.sections) {
-      if (section.type === "gallery") section.props.imageIds.forEach((i) => imageIds.add(i));
-      if (section.type === "hero" && section.props.imageId) imageIds.add(section.props.imageId);
-      if (section.type === "about" && section.props.imageId) imageIds.add(section.props.imageId);
+    let images = 0;
+    for (const file of bundle) {
+      const dest = path.join(target, file.name);
+      await mkdir(path.dirname(dest), { recursive: true });
+      if (file.kind === "text") {
+        await writeFile(dest, file.content, "utf8");
+      } else if (existsSync(file.source)) {
+        await copyFile(file.source, dest);
+        images += 1;
+      }
     }
-    for (const assetId of imageIds) {
-      const src = path.join(UPLOAD_DIR, `${assetId}.webp`);
-      if (existsSync(src)) await copyFile(src, path.join(target, "images", `${assetId}.webp`));
-    }
-    log(id, `${imageIds.size} image${imageIds.size === 1 ? "" : "s"} bundled`);
+    log(id, `${site.meta.locales.length} language${site.meta.locales.length === 1 ? "" : "s"}, ${images} image${images === 1 ? "" : "s"} bundled`);
 
     log(id, "Deploying", "deploying");
     await pause(400);
 
     if (platform === "builtin") {
-      const url = `${origin.replace(/\/$/, "")}/s/${slug}`;
       log(id, "Published");
-      update(id, { status: "live", url });
+      update(id, { status: "live", url: `${siteBase}/` });
       return;
     }
 
@@ -181,7 +183,16 @@ async function runDeployment(
       );
     }
 
-    const url = await deployToProvider(platform, slug, html, (line) => log(id, line));
+    const defaultDoc = bundle.find(
+      (f): f is Extract<typeof f, { kind: "text" }> =>
+        f.kind === "text" && f.name === `${site.meta.defaultLocale}/index.html`,
+    );
+    const url = await deployToProvider(
+      platform,
+      slug,
+      defaultDoc?.content ?? "",
+      (line) => log(id, line),
+    );
     log(id, "Published");
     update(id, { status: "live", url });
   } catch (err) {

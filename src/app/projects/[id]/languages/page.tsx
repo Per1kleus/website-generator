@@ -2,11 +2,11 @@ import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import { getCurrentUser } from "@/server/auth";
 import { getProject } from "@/server/projects";
-import { DevicePreview } from "@/components/DevicePreview";
+import { LanguageManager } from "@/components/LanguageManager";
 
-export const metadata: Metadata = { title: "Preview" };
+export const metadata: Metadata = { title: "Languages" };
 
-export default async function PreviewPage({
+export default async function LanguagesPage({
   params,
 }: {
   params: Promise<{ id: string }>;
@@ -20,11 +20,10 @@ export default async function PreviewPage({
   if (!project.site) redirect(`/projects/${id}`);
 
   return (
-    <DevicePreview
+    <LanguageManager
       projectId={id}
       businessName={project.business_name}
-      locales={project.site.meta.locales}
-      defaultLocale={project.site.meta.defaultLocale}
+      initialSite={project.site}
     />
   );
 }

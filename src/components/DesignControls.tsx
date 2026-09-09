@@ -3,7 +3,8 @@
 import { useState } from "react";
 import { AppShell } from "./AppShell";
 import { AppBar, Banner, BottomSheet, Button, useToast } from "./ui";
-import { FONT_CHOICES, type LayoutDensity, type Site } from "@/lib/site";
+import { ARCHITECTURES } from "@/lib/architectures";
+import { FONT_CHOICES, key, t, type LayoutDensity, type Site } from "@/lib/site";
 import { PALETTES } from "@/lib/styles";
 
 /**
@@ -33,7 +34,12 @@ const LAYOUTS: { id: LayoutDensity; label: string; hint: string }[] = [
   { id: "dense", label: "Dense", hint: "More on screen, less scrolling" },
 ];
 
-type Sheet = null | { kind: "palette" } | { kind: "color"; role: string } | { kind: "font"; role: "heading" | "body" };
+type Sheet =
+  | null
+  | { kind: "palette" }
+  | { kind: "architecture" }
+  | { kind: "color"; role: string }
+  | { kind: "font"; role: "heading" | "body" };
 
 export function DesignControls({
   projectId,
@@ -49,6 +55,9 @@ export function DesignControls({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const { toast, toastNode } = useToast();
+
+  const currentArchitecture =
+    ARCHITECTURES.find((a) => a.id === site.theme.architecture) ?? ARCHITECTURES[0];
 
   async function save(next: Site, message = "Design saved") {
     setSite(next);
@@ -88,7 +97,26 @@ export function DesignControls({
 
       {error && <Banner tone="error">{error}</Banner>}
 
+      {/* The architecture is the biggest lever on how the site looks, so it
+          comes first — changing it re-composes the page, not just its palette. */}
       <section className="mt-4">
+        <h2 className="mb-2 text-sm font-bold uppercase tracking-wide text-muted">
+          Design architecture
+        </h2>
+        <button
+          type="button"
+          onClick={() => setSheet({ kind: "architecture" })}
+          className="flex min-h-[var(--spacing-touch-lg)] w-full items-center gap-3 rounded-card border border-line bg-surface p-4 text-left active:scale-[0.99]"
+        >
+          <span className="min-w-0 flex-1">
+            <span className="block font-semibold">{currentArchitecture.label}</span>
+            <span className="block text-sm text-muted">{currentArchitecture.rationale}</span>
+          </span>
+          <span aria-hidden="true" className="shrink-0 text-muted">›</span>
+        </button>
+      </section>
+
+      <section className="mt-6">
         <h2 className="mb-2 text-sm font-bold uppercase tracking-wide text-muted">
           Colours
         </h2>
@@ -230,7 +258,7 @@ export function DesignControls({
           <span className="min-w-0 flex-1">
             <span className="block font-semibold">Sticky button on phones</span>
             <span className="block text-sm text-muted">
-              Keeps “{site.meta.stickyCta.label}” pinned to the bottom of the screen.
+              Keeps “{t(site, site.meta.defaultLocale, key.meta("stickyCtaLabel")) || "Contact"}” pinned to the bottom of the screen.
             </span>
           </span>
           <span
@@ -258,7 +286,7 @@ export function DesignControls({
           style={{ background: site.theme.colors.bg, color: site.theme.colors.text }}
         >
           <p style={{ color: site.theme.colors.primary, fontWeight: 700, fontSize: ".8125rem", letterSpacing: ".06em", textTransform: "uppercase", margin: 0 }}>
-            {site.meta.tagline || "Your business"}
+            {t(site, site.meta.defaultLocale, key.meta("tagline")) || "Your business"}
           </p>
           <p style={{ fontSize: "1.5rem", fontWeight: 700, margin: ".4rem 0 .3rem", fontFamily: FONT_CHOICES.find((f) => f.id === site.theme.fonts.heading)?.stack }}>
             {site.meta.businessName}
@@ -273,7 +301,7 @@ export function DesignControls({
               background: site.theme.colors.primary, color: site.theme.colors.bg, fontWeight: 650,
             }}
           >
-            {site.meta.stickyCta.label || "Contact"}
+            {t(site, site.meta.defaultLocale, key.meta("stickyCtaLabel")) || "Contact"}
           </span>
         </div>
       </section>
@@ -290,6 +318,49 @@ export function DesignControls({
       </div>
 
       {/* ------------------------------ sheets ------------------------------ */}
+
+      <BottomSheet
+        open={sheet?.kind === "architecture"}
+        onClose={() => setSheet(null)}
+        title="Design architecture"
+      >
+        <p className="mb-3 text-sm text-muted">
+          This changes the composition — layout, type scale, image treatment,
+          navigation and motion — not just the colours.
+        </p>
+        <div className="grid gap-2 pb-4">
+          {ARCHITECTURES.map((a) => {
+            const active = a.id === site.theme.architecture;
+            return (
+              <button
+                key={a.id}
+                type="button"
+                onClick={() => {
+                  save(
+                    {
+                      ...site,
+                      theme: {
+                        ...site.theme,
+                        architecture: a.id,
+                        fonts: { ...a.fonts },
+                        radius: a.radius,
+                      },
+                    },
+                    `${a.label} applied`,
+                  );
+                  setSheet(null);
+                }}
+                className={`min-h-[var(--spacing-touch-lg)] rounded-card border p-4 text-left ${
+                  active ? "border-brand bg-brand-soft" : "border-line"
+                }`}
+              >
+                <span className="block font-semibold">{a.label}</span>
+                <span className="block text-sm text-muted">{a.rationale}</span>
+              </button>
+            );
+          })}
+        </div>
+      </BottomSheet>
 
       <BottomSheet
         open={sheet?.kind === "palette"}

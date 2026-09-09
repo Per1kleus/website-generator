@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { BottomSheet, Banner } from "./ui";
 import { IconSend, IconSparkles } from "./icons";
+import { localeInfo, type Locale } from "@/lib/locales";
 import type { Site } from "@/lib/site";
 
 /**
@@ -13,7 +14,7 @@ import type { Site } from "@/lib/site";
  * a horizontal chip rail so they cost one line of vertical space, not eight.
  */
 
-const SUGGESTIONS = [
+const DESIGN_SUGGESTIONS = [
   "Make it more luxurious",
   "Make it more minimal",
   "Change the colors",
@@ -25,15 +26,28 @@ const SUGGESTIONS = [
   "Make the buttons stand out",
 ];
 
+/** Language commands only make sense once more than one language exists. */
+const LANGUAGE_SUGGESTIONS = [
+  "Add English as a website language",
+  "Translate the menu into English",
+  "Make the Greek version more natural",
+  "Improve the English copy, keep the design",
+];
+
 export function AiSheet({
   open,
   projectId,
+  locale,
+  locales,
   focusSectionId,
   onClose,
   onApplied,
 }: {
   open: boolean;
   projectId: string;
+  /** The language currently being edited; unnamed instructions target it. */
+  locale?: Locale;
+  locales?: Locale[];
   focusSectionId?: string;
   onClose: () => void;
   onApplied: (site: Site, summary: string) => void;
@@ -43,6 +57,12 @@ export function AiSheet({
   const [note, setNote] = useState("");
   const [error, setError] = useState("");
   const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  const multilingual = (locales?.length ?? 1) > 1;
+  // Language commands are surfaced only once they are meaningful.
+  const suggestions = multilingual
+    ? [...LANGUAGE_SUGGESTIONS.slice(0, 3), ...DESIGN_SUGGESTIONS]
+    : [...DESIGN_SUGGESTIONS, LANGUAGE_SUGGESTIONS[0]];
 
   useEffect(() => {
     if (!open) {
@@ -69,7 +89,7 @@ export function AiSheet({
       const res = await fetch(`/api/projects/${projectId}/ai`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ instruction: text, sectionId: focusSectionId }),
+        body: JSON.stringify({ instruction: text, sectionId: focusSectionId, locale }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -155,7 +175,7 @@ export function AiSheet({
 
       {/* Chip rail — swipeable, each chip is a full 44px target. */}
       <div className="snap-rail no-scrollbar -mx-4 mb-2 px-4 pb-1">
-        {SUGGESTIONS.map((s) => (
+        {suggestions.map((s) => (
           <button
             key={s}
             type="button"
@@ -172,7 +192,9 @@ export function AiSheet({
       </div>
 
       <p className="pb-2 text-xs text-muted">
-        Tap a suggestion, or describe the change in your own words.
+        {multilingual
+          ? `Tap a suggestion, or describe the change. Unless you name a language, this changes the ${localeInfo(locale ?? "en").english} text only.`
+          : "Tap a suggestion, or describe the change in your own words."}
       </p>
     </BottomSheet>
   );

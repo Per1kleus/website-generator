@@ -3,11 +3,14 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { getCurrentUser } from "@/server/auth";
 import { getProject, listAssets, listVersions } from "@/server/projects";
-import { qaCheck } from "@/server/jobs";
+import { validateSite } from "@/server/validate";
+import { architecture } from "@/lib/architectures";
+import { localeInfo } from "@/lib/locales";
 import { AppShell } from "@/components/AppShell";
+import { DesignQuestions, type DesignQuestion } from "@/components/DesignQuestions";
 import { AppBar, Banner, Card, LinkButton } from "@/components/ui";
 import {
-  IconDownload, IconEye, IconImage, IconLayers, IconPalette,
+  IconDownload, IconEye, IconGlobe, IconImage, IconLayers, IconPalette,
   IconPencil, IconRocket, IconSettings,
 } from "@/components/icons";
 import { SITE_KINDS } from "@/lib/site";
@@ -40,13 +43,19 @@ export default async function ProjectPage({
   const kind = SITE_KINDS.find((k) => k.id === project.site_kind);
   const versions = listVersions(id);
   const assets = listAssets(id);
-  const warnings = project.site ? qaCheck(project.site) : [];
+  const findings = project.site ? validateSite(project.site) : [];
+  // Identity analysis may leave design decisions open; those become questions.
+  const identity = project.designSystem as { questions?: DesignQuestion[] } | null;
+  const questions = (identity?.questions ?? []).filter((q) => q?.question && q.options?.length);
+  const errors = findings.filter((f) => f.level === "error");
+  const warnings = findings.filter((f) => f.level === "warning");
 
   const actions = [
     { href: `/projects/${id}/preview`, label: "Preview", hint: "Mobile, tablet, desktop", Icon: IconEye },
     { href: `/projects/${id}/edit`, label: "Edit sections", hint: `${project.site?.sections.length ?? 0} sections`, Icon: IconPencil },
-    { href: `/projects/${id}/design`, label: "Design", hint: "Colours, fonts, layout", Icon: IconPalette },
+    { href: `/projects/${id}/design`, label: "Design", hint: project.site ? architecture(project.site.theme.architecture).label : "Colours, fonts", Icon: IconPalette },
     { href: `/projects/${id}/media`, label: "Images", hint: `${assets.length} uploaded`, Icon: IconImage },
+    { href: `/projects/${id}/languages`, label: "Languages", hint: project.site ? project.site.meta.locales.map((l) => localeInfo(l).short).join(" · ") : "—", Icon: IconGlobe },
     { href: `/projects/${id}/versions`, label: "Versions", hint: `${versions.length} saved`, Icon: IconLayers },
     { href: `/projects/${id}/export`, label: "Export", hint: "Download a ZIP", Icon: IconDownload },
     { href: `/projects/${id}/deploy`, label: "Deploy", hint: "Publish it live", Icon: IconRocket },
@@ -89,15 +98,26 @@ export default async function ProjectPage({
             <IconEye size={20} /> Preview website
           </LinkButton>
 
+          <DesignQuestions projectId={id} questions={questions} />
+
+          {errors.length > 0 && (
+            <Banner tone="error">
+              <span className="font-bold">
+                {errors.length} thing{errors.length === 1 ? "" : "s"} need fixing
+              </span>
+              <ul className="mt-1.5 list-disc space-y-0.5 pl-4 font-normal">
+                {errors.map((f) => <li key={f.message}>{f.message}</li>)}
+              </ul>
+            </Banner>
+          )}
+
           {warnings.length > 0 && (
             <Banner tone="warning">
               <span className="font-bold">
                 {warnings.length} thing{warnings.length === 1 ? "" : "s"} to review
               </span>
               <ul className="mt-1.5 list-disc space-y-0.5 pl-4 font-normal">
-                {warnings.map((w) => (
-                  <li key={w}>{w}</li>
-                ))}
+                {warnings.slice(0, 6).map((f) => <li key={f.message}>{f.message}</li>)}
               </ul>
             </Banner>
           )}

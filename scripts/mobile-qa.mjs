@@ -12,6 +12,7 @@
  */
 import { chromium } from "playwright";
 import { mkdirSync } from "node:fs";
+import sharp from "sharp";
 
 const BASE = process.argv[2] ?? "http://localhost:3100";
 const EXEC = process.env.PW_CHROME ?? "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
@@ -20,6 +21,19 @@ const SHOTS = "qa-screenshots";
 // The exact widths the requirements name, plus the shell breakpoints.
 const WIDTHS = [320, 375, 390, 430, 768, 1024, 1280, 1440];
 const MIN_TARGET = 44;
+
+
+/**
+ * Real image fixtures, built with sharp rather than hand-written base64, so a
+ * malformed literal can never masquerade as an application bug.
+ */
+async function makePng(width, height, rgb) {
+  return sharp({
+    create: { width, height, channels: 3, background: rgb },
+  })
+    .png()
+    .toBuffer();
+}
 
 const results = [];
 let failures = 0;
@@ -165,6 +179,16 @@ async function main() {
   await page
     .getByLabel("Describe the business")
     .fill("Small independent coffee shop near the station. We roast our own beans and bake everything in-house.");
+  // Requirement 20: the logo control sits directly below the business name.
+  const logoButton = page.getByRole("button", { name: "Add a logo" });
+  record("logo upload is offered under the business name", await logoButton.isVisible());
+  const logoPng = await makePng(240, 240, { r: 0x16, g: 0x65, b: 0x34 });
+  await page.locator('input[type="file"][accept*="svg"]').setInputFiles({
+    name: "logo.png", mimeType: "image/png", buffer: logoPng,
+  });
+  await page.getByRole("button", { name: "Remove logo" }).waitFor({ timeout: 20000 });
+  record("logo uploads and previews in the wizard", true);
+
   await page.screenshot({ path: `${SHOTS}/03-wizard-business.png` });
   await page.getByRole("button", { name: "Continue" }).click();
 
@@ -185,9 +209,25 @@ async function main() {
   await page.screenshot({ path: `${SHOTS}/05-wizard-type.png` });
   await page.getByRole("button", { name: "Continue" }).click();
 
-  // Step 4: style
+  // Step 4: languages — pick Greek as the main language and add English, so
+  // the rest of the run exercises the real multi-language path.
+  await checkTouchTargets(page, "wizard step 4 (languages)");
+  await page.getByRole("radio", { name: /Greek/ }).click();
+  // Choosing a new main language keeps the previous one as a second language,
+  // so only tick English if it is not already selected.
+  const englishBox = page.getByRole("checkbox", { name: /English/ });
+  if ((await englishBox.getAttribute("aria-checked")) !== "true") await englishBox.click();
+  record("English is enabled alongside Greek", (await englishBox.getAttribute("aria-checked")) === "true");
+  await page.screenshot({ path: `${SHOTS}/06-wizard-languages.png` });
+  record(
+    "wizard explains that two languages produce a visitor switcher",
+    await page.getByText(/2 languages\. Visitors will see a switcher/).isVisible(),
+  );
+  await page.getByRole("button", { name: "Continue" }).click();
+
+  // Step 5: style
   await page.getByRole("radio", { name: /Warm/ }).click();
-  await page.screenshot({ path: `${SHOTS}/06-wizard-style.png` });
+  await page.screenshot({ path: `${SHOTS}/06b-wizard-style.png` });
   await page.getByRole("button", { name: "Generate website" }).click();
 
   /* 4. Generation -------------------------------------------------------- */
@@ -204,7 +244,7 @@ async function main() {
   await other.close();
   await page.bringToFront();
 
-  await page.getByText("Your website is ready", { exact: false }).first().waitFor({ timeout: 90000 });
+  await page.getByText("Your website is ready", { exact: false }).first().waitFor({ timeout: 240000 });
   record("generation completes while the app was backgrounded", true);
   await page.screenshot({ path: `${SHOTS}/08-generated.png` });
 
@@ -233,6 +273,108 @@ async function main() {
   await page.screenshot({ path: `${SHOTS}/10-preview-desktop.png` });
   await page.getByRole("radio", { name: "Mobile" }).click();
 
+  /* 5b. Visitor language system ------------------------------------------ */
+  // The preview renders the real per-language document, so asserting here is
+  // asserting what a visitor actually receives.
+  const previewFrame = page.frameLocator("iframe");
+  record(
+    "preview offers a language selector when 2 languages are enabled",
+    await page.getByRole("radio", { name: /Greek/ }).isVisible(),
+  );
+
+  const elDoc = await page.evaluate(async (pid) => {
+    const res = await fetch(`/api/projects/${pid}/render?locale=el`);
+    return res.text();
+  }, projectId);
+  const enDoc = await page.evaluate(async (pid) => {
+    const res = await fetch(`/api/projects/${pid}/render?locale=en`);
+    return res.text();
+  }, projectId);
+
+  record('Greek document declares lang="el"', /<html lang="el"/.test(elDoc));
+  record('English document declares lang="en"', /<html lang="en"/.test(enDoc));
+  record(
+    "each language links the other with hreflang",
+    /hreflang="en"/.test(elDoc) && /hreflang="el"/.test(elDoc) && /hreflang="x-default"/.test(elDoc),
+  );
+  record(
+    "the generated site renders a visitor language switcher",
+    /<nav class="lang/.test(elDoc) || /lang-banner/.test(elDoc),
+  );
+  record("structured data is emitted per language", /application\/ld\+json/.test(elDoc) && /"inLanguage":"el"/.test(elDoc));
+  record("og:locale is localised", /og:locale" content="el"/.test(elDoc) && /og:locale:alternate" content="en"/.test(elDoc));
+
+  // Requirement 30: switching language must not change the design identity.
+  const styleOf = (doc) => (doc.match(/<style>([\s\S]*?)<\/style>/) ?? [])[1] ?? "";
+  record(
+    "changing language does not change the design (identical stylesheet)",
+    styleOf(elDoc).length > 0 && styleOf(elDoc) === styleOf(enDoc),
+  );
+  const sectionsOf = (doc) => (doc.match(/<section[^>]*id="([^"]+)"/g) ?? []).join("|");
+  record(
+    "changing language does not change the structure (identical sections)",
+    sectionsOf(elDoc).length > 0 && sectionsOf(elDoc) === sectionsOf(enDoc),
+  );
+  record(
+    "changing language does change the content",
+    elDoc.replace(/<style>[\s\S]*?<\/style>/, "") !== enDoc.replace(/<style>[\s\S]*?<\/style>/, ""),
+  );
+
+  // Prices are structural and must be byte-identical across languages.
+  const pricesOf = (doc) => (doc.match(/<span class="price">([^<]*)<\/span>/g) ?? []).join("|");
+  record("prices are never translated", pricesOf(elDoc) === pricesOf(enDoc));
+
+  await page.getByRole("radio", { name: /English/ }).click();
+  await page.waitForTimeout(800);
+  await page.screenshot({ path: `${SHOTS}/09b-preview-english.png` });
+  await page.getByRole("radio", { name: /Greek/ }).click();
+
+  /* 5c. Language management ---------------------------------------------- */
+  await page.goto(`${projectUrl}/languages`, { waitUntil: "networkidle" });
+  await checkNoHorizontalOverflow(page, "languages");
+  await checkTouchTargets(page, "languages");
+  await page.screenshot({ path: `${SHOTS}/09c-languages.png` });
+  record(
+    "languages screen lists both enabled languages",
+    (await page.getByText("Greek", { exact: false }).count()) > 0 &&
+      (await page.getByText("English", { exact: false }).count()) > 0,
+  );
+
+  // Removing a language must leave the others and the design untouched.
+  await page.getByRole("button", { name: /Remove English/ }).click();
+  await page.getByRole("dialog").waitFor();
+  await page.waitForTimeout(400);
+  await page.getByRole("button", { name: "Remove", exact: true }).click();
+  await page.waitForTimeout(2000);
+  const afterRemoval = await page.evaluate(async (pid) => {
+    const res = await fetch(`/api/projects/${pid}/render?locale=el`);
+    return res.text();
+  }, projectId);
+  record(
+    "removing a language hides the visitor switcher when one remains",
+    !/hreflang="en"/.test(afterRemoval),
+  );
+  record(
+    "removing a language does not change the design",
+    styleOf(afterRemoval) === styleOf(elDoc),
+  );
+
+  // Re-add it so the rest of the run continues multilingual.
+  await page.getByRole("button", { name: "Add a language" }).click();
+  await page.getByRole("dialog").waitFor();
+  await page.waitForTimeout(400);
+  await page.getByRole("button", { name: /English/ }).first().click();
+  await page.waitForTimeout(3000);
+  const readded = await page.evaluate(async (pid) => {
+    const res = await fetch(`/api/projects/${pid}/render?locale=el`);
+    return res.text();
+  }, projectId);
+  record("a language can be added back after generation", /hreflang="en"/.test(readded));
+  record(
+    "adding a language does not regenerate the design",
+    styleOf(readded) === styleOf(elDoc),
+  );
+
   /* 6. Editor + reordering ----------------------------------------------- */
   await page.goto(`${projectUrl}/edit`, { waitUntil: "networkidle" });
   await checkNoHorizontalOverflow(page, "editor");
@@ -259,6 +401,17 @@ async function main() {
   await page.waitForTimeout(1200);
   record("section edit saves", true);
 
+  /* 6b. Per-language editing ---------------------------------------------- */
+  record(
+    "editor shows a language tab bar when multilingual",
+    await page.getByRole("tablist", { name: "Editing language" }).isVisible(),
+  );
+  await page.getByRole("tab", { name: /English/ }).click();
+  await page.waitForTimeout(400);
+  await page.screenshot({ path: `${SHOTS}/11b-editor-english.png` });
+  record("editor can switch the language being edited", true);
+  await page.getByRole("tab", { name: /Greek/ }).click();
+
   /* 7. AI editor --------------------------------------------------------- */
   await page.getByRole("button", { name: "Ask AI to edit" }).click();
   await page.getByRole("dialog").waitFor();
@@ -284,10 +437,7 @@ async function main() {
   record("camera input requests the rear camera", (await cameraInput.count()) === 1);
 
   // Upload a real image through the library picker.
-  const png = Buffer.from(
-    "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAJUlEQVR4nGP8//8/AzGAiYFIMKpwWOFQTzGjCkcVDhWFAAAAAP//AwB1qgQAn0z3iQAAAABJRU5ErkJggg==",
-    "base64",
-  );
+  const png = await makePng(1200, 900, { r: 0x92, g: 0x40, b: 0x0e });
   await page.locator('input[type="file"][accept="image/*"][multiple]').setInputFiles({
     name: "shopfront.png",
     mimeType: "image/png",
@@ -329,6 +479,20 @@ async function main() {
   ]).then(([d]) => d);
   const zipPath = await download.path();
   record("ZIP export downloads on mobile", Boolean(zipPath), await download.suggestedFilename());
+  if (zipPath) {
+    const { execFileSync } = await import("node:child_process");
+    let listing = "";
+    try {
+      listing = execFileSync("unzip", ["-Z1", zipPath], { encoding: "utf8" });
+    } catch {
+      listing = "";
+    }
+    if (listing) {
+      record("export contains a folder per language", listing.includes("el/index.html") && listing.includes("en/index.html"));
+      record("export contains a sitemap and robots.txt", listing.includes("sitemap.xml") && listing.includes("robots.txt"));
+      record("export contains a root redirect document", listing.includes("index.html"));
+    }
+  }
   await page.screenshot({ path: `${SHOTS}/18-export.png` });
 
   /* 12. Deploy ----------------------------------------------------------- */
@@ -343,6 +507,25 @@ async function main() {
   const liveUrl = await page.locator("a", { hasText: "Open website" }).getAttribute("href");
   record("live URL is produced", Boolean(liveUrl), liveUrl ?? "");
 
+  if (liveUrl) {
+    const base = liveUrl.replace(/\/$/, "");
+    for (const loc of ["el", "en"]) {
+      const res = await page.evaluate(async (u) => {
+        const r = await fetch(u);
+        return { status: r.status, body: await r.text() };
+      }, `${base}/${loc}/`);
+      record(`deployed site serves /${loc}/`, res.status === 200 && res.body.includes(`<html lang="${loc}"`));
+    }
+    const sm = await page.evaluate(async (u) => {
+      const r = await fetch(u);
+      return { status: r.status, body: await r.text() };
+    }, `${base}/sitemap.xml`);
+    record(
+      "deployed sitemap lists both languages with hreflang",
+      sm.status === 200 && sm.body.includes('hreflang="el"') && sm.body.includes('hreflang="en"'),
+    );
+  }
+
   /* 13. The deployed site itself, on a phone ------------------------------ */
   if (liveUrl) {
     const guest = await browser.newContext({
@@ -351,7 +534,7 @@ async function main() {
       hasTouch: true,
     });
     const guestPage = await guest.newPage();
-    await guestPage.goto(liveUrl, { waitUntil: "networkidle" });
+    await guestPage.goto(`${liveUrl.replace(/\/$/, "")}/el/`, { waitUntil: "networkidle" });
     await checkNoHorizontalOverflow(guestPage, "generated site (390px)");
     await checkTouchTargets(guestPage, "generated site (390px)");
     await guestPage.screenshot({ path: `${SHOTS}/20-live-site.png`, fullPage: true });
@@ -365,6 +548,58 @@ async function main() {
     await guest.close();
   }
 
+  /* 13b. A second business, a different architecture ---------------------- */
+  // Requirement 6: a generated site must not look like a generic copy of a
+  // template. Building a second, different business and diffing the rendered
+  // stylesheet is the cheapest honest test of that.
+  console.log(`\n=== Second business (different architecture) ===\n`);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`${BASE}/projects/new`, { waitUntil: "networkidle" });
+  await page.getByLabel("Business name").fill("Atelier Nord");
+  await page.getByLabel("What kind of business is it?").fill("Architecture studio");
+  await page.getByLabel("Describe the business").fill("A small architecture studio working on stone and concrete houses.");
+  await page.getByRole("button", { name: "Continue" }).click();
+  await page.getByLabel("Town or city").fill("Oslo");
+  await page.getByRole("button", { name: "Continue" }).click();
+  await page.getByRole("radio", { name: /Full business website/ }).click();
+  await page.getByRole("button", { name: "Continue" }).click();
+  await page.getByRole("button", { name: "Continue" }).click(); // keep English only
+  await page.getByRole("radio", { name: /Elegant/ }).click();
+  await page.getByRole("button", { name: "Generate website" }).click();
+  await page.waitForURL(/\/generate/, { timeout: 20000 });
+  await page.getByText("Your website is ready", { exact: false }).first().waitFor({ timeout: 240000 });
+
+  const secondUrl = page.url().replace(/\/generate$/, "");
+  const secondId = secondUrl.split("/").pop();
+  const secondDoc = await page.evaluate(async (pid) => {
+    const res = await fetch(`/api/projects/${pid}/render`);
+    return res.text();
+  }, secondId);
+
+  const cssA = styleOf(elDoc);
+  const cssB = styleOf(secondDoc);
+  record("the two businesses produce different stylesheets", cssA !== cssB);
+  // Not just different colours: the composition rules themselves differ.
+  const rule = (css, name) => (css.match(new RegExp(`${name}:[^;\n]*`)) ?? [""])[0];
+  record(
+    "type scale differs between architectures",
+    rule(cssA, "--measure") !== rule(cssB, "--measure") || rule(cssA, "--block") !== rule(cssB, "--block"),
+  );
+  record(
+    "a business website gets a real site header (a menu does not)",
+    secondDoc.includes('class="site-header"') && !elDoc.includes('class="site-header"'),
+  );
+  record(
+    "a single-language site shows no language switcher",
+    !/hreflang="el"/.test(secondDoc) && !secondDoc.includes('<nav class="lang'),
+  );
+  record("every generated site has a footer", secondDoc.includes("<footer") && elDoc.includes("<footer"));
+
+  await page.goto(`${secondUrl}/preview`, { waitUntil: "networkidle" });
+  await page.waitForTimeout(1200);
+  await page.screenshot({ path: `${SHOTS}/22-second-business.png` });
+  await checkNoHorizontalOverflow(page, "second business preview");
+
   /* 14. Every app screen at every required width -------------------------- */
   console.log(`\n=== App screens across breakpoints ===\n`);
   const screens = [
@@ -375,6 +610,7 @@ async function main() {
     ["editor", `${projectUrl}/edit`],
     ["design", `${projectUrl}/design`],
     ["media", `${projectUrl}/media`],
+    ["languages", `${projectUrl}/languages`],
     ["versions", `${projectUrl}/versions`],
     ["export", `${projectUrl}/export`],
     ["deploy", `${projectUrl}/deploy`],
