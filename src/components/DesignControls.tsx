@@ -124,7 +124,7 @@ export function DesignControls({
           <button
             type="button"
             onClick={() => setSheet({ kind: "palette" })}
-            className="flex min-h-[var(--spacing-touch-lg)] w-full items-center gap-3 border-b border-line px-4 text-left active:bg-elevated"
+            className="flex min-h-[var(--spacing-touch-lg)] w-full items-center gap-3 border-b border-line px-4 text-left hover:bg-elevated active:bg-elevated"
           >
             <span className="flex-1 font-semibold">Use a palette</span>
             <span aria-hidden="true" className="flex gap-1">
@@ -139,7 +139,7 @@ export function DesignControls({
               key={role.key}
               type="button"
               onClick={() => setSheet({ kind: "color", role: role.key })}
-              className={`flex min-h-[var(--spacing-touch-lg)] w-full items-center gap-3 px-4 text-left active:bg-elevated ${
+              className={`flex min-h-[var(--spacing-touch-lg)] w-full items-center gap-3 px-4 text-left hover:bg-elevated active:bg-elevated ${
                 i < COLOR_ROLES.length - 1 ? "border-b border-line" : ""
               }`}
             >
@@ -168,7 +168,7 @@ export function DesignControls({
               key={role}
               type="button"
               onClick={() => setSheet({ kind: "font", role })}
-              className={`flex min-h-[var(--spacing-touch-lg)] w-full items-center gap-3 px-4 text-left active:bg-elevated ${
+              className={`flex min-h-[var(--spacing-touch-lg)] w-full items-center gap-3 px-4 text-left hover:bg-elevated active:bg-elevated ${
                 i === 0 ? "border-b border-line" : ""
               }`}
             >

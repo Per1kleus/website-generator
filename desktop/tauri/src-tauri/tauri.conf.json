@@ -29,7 +29,9 @@
     ],
     "resources": {
       "../../../.next/standalone/": "server/",
-      "../../sidecar/launch.mjs": "sidecar/launch.mjs"
+      "../../sidecar/launch.mjs": "sidecar/launch.mjs",
+      "../../bootstrap/": "bootstrap/",
+      "../npm/": "npm/"
     },
     "externalBin": [
       "binaries/wg-node"

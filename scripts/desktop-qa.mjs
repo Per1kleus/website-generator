@@ -16,7 +16,7 @@
  */
 import { spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -56,6 +56,30 @@ function stop(child) {
 }
 
 const dataDir = mkdtempSync(path.join(tmpdir(), "wg-desktop-"));
+
+/**
+ * Next leaves .next/static and public/ for whoever packages the app, so the
+ * packaging script copies them into the standalone tree. This suite runs
+ * against that same tree, so it needs the same copy — otherwise it would test
+ * a server whose stylesheets 404 and call that normal.
+ */
+function stageStandalone() {
+  const standalone = path.join(process.cwd(), ".next", "standalone");
+  if (!existsSync(path.join(standalone, "server.js"))) {
+    console.error("No standalone server found. Run `npm run build` first.");
+    process.exit(1);
+  }
+  const staticDir = path.join(standalone, ".next", "static");
+  if (!existsSync(staticDir)) {
+    cpSync(path.join(process.cwd(), ".next", "static"), staticDir, { recursive: true });
+  }
+  const publicDir = path.join(standalone, "public");
+  if (!existsSync(publicDir) && existsSync(path.join(process.cwd(), "public"))) {
+    cpSync(path.join(process.cwd(), "public"), publicDir, { recursive: true });
+  }
+}
+
+stageStandalone();
 
 try {
   console.log("\n=== The sidecar ===\n");

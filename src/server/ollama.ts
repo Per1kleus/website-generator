@@ -30,6 +30,9 @@ export const DEFAULT_MODEL = process.env.WG_OLLAMA_MODEL || "qwen2.5:0.5b";
 /** Auto-pull on first launch unless explicitly disabled. */
 export const AUTOPULL = process.env.WG_OLLAMA_AUTOPULL !== "0";
 
+/** Ollama omits ":latest" when a model was pulled without a tag. */
+const tagged = (name: string) => (name.includes(":") ? name : `${name}:latest`);
+
 export type OllamaState = {
   /** Is the daemon reachable at all? */
   available: boolean;
@@ -81,8 +84,10 @@ export async function probe(timeoutMs = 2000): Promise<OllamaState> {
       ...state,
       available: true,
       models,
-      // Ollama reports "qwen2.5:0.5b"; accept a bare name matching too.
-      modelReady: models.some((m) => m === DEFAULT_MODEL || m.split(":")[0] === DEFAULT_MODEL.split(":")[0]),
+      // The tag is part of the identity — a 0.5B download does not make a
+      // configured 3B model ready — so only an implicit ":latest" is
+      // normalised away.
+      modelReady: models.some((m) => tagged(m) === tagged(DEFAULT_MODEL)),
       checkedAt: Date.now(),
     };
   } catch {

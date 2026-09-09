@@ -5,7 +5,7 @@ import { Banner, Button, Card } from "./ui";
 import { IconCheck, IconSparkles } from "./icons";
 
 type Setup = {
-  skill: { available: boolean; name: string };
+  skill: { available: boolean; name: string; source?: "installed" | "vendored" };
   ollama: {
     available: boolean;
     modelReady: boolean;
@@ -97,7 +97,11 @@ export function DesignEngineCard() {
             <span className="block text-sm font-semibold">Design catalogue</span>
             <span className="block text-xs text-muted">
               {skill.available
-                ? "ui-ux-pro-max — 79 UI styles, colour systems, font pairings and landing patterns."
+                ? `ui-ux-pro-max — 79 UI styles, colour systems, font pairings and landing patterns.${
+                    skill.source === "installed"
+                      ? " Installed by the setup, so it stays current."
+                      : ""
+                  }`
                 : "ui-ux-pro-max needs Python 3 on the server. Designs fall back to built-in presets."}
             </span>
           </span>

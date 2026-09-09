@@ -13,7 +13,7 @@ export default async function DashboardPage() {
   const firstName = user.name.split(" ")[0];
 
   return (
-    <AppShell>
+    <AppShell wide>
       <AppBar
         title="Projects"
         subtitle={`${projects.length} project${projects.length === 1 ? "" : "s"}`}
@@ -40,9 +40,9 @@ export default async function DashboardPage() {
         </div>
       ) : (
         <>
-          {/* Cards stack vertically on phones and become a grid only where
-              there is genuine horizontal room — never a dense table. */}
-          <ul className="mt-2 grid grid-cols-1 gap-3 lg:grid-cols-2">
+          {/* A workspace grid: as many columns as the window genuinely has
+              room for, down to one when it is narrow. */}
+          <ul className="mt-2 grid grid-cols-1 gap-3 md:grid-cols-2 2xl:grid-cols-3">
             {projects.map((p) => (
               <li key={p.id}>
                 <ProjectCard project={p} />
@@ -50,7 +50,7 @@ export default async function DashboardPage() {
             ))}
           </ul>
 
-          <Card className="mt-4 border-dashed text-center">
+          <Card className="mt-4 max-w-md border-dashed text-center">
             <p className="text-sm text-muted">Got another business?</p>
             <LinkButton href="/projects/new" variant="secondary" className="mt-3">
               Create a project

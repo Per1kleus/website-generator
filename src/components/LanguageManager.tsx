@@ -137,7 +137,7 @@ export function LanguageManager({
                         type="button"
                         onClick={() => setConfirmRemove(code)}
                         aria-label={`Remove ${info.english}`}
-                        className="flex size-11 shrink-0 items-center justify-center rounded-xl text-danger active:bg-elevated"
+                        className="flex size-11 shrink-0 items-center justify-center rounded-xl text-danger hover:bg-elevated active:bg-elevated"
                       >
                         <IconTrash size={18} />
                       </button>
@@ -175,7 +175,7 @@ export function LanguageManager({
                 const ok = await call("add", l.code, `${l.english} added`);
                 if (ok) setAddOpen(false);
               }}
-              className="flex min-h-[var(--spacing-touch-lg)] items-center gap-3 rounded-card border border-line px-4 text-left active:bg-elevated disabled:opacity-50"
+              className="flex min-h-[var(--spacing-touch-lg)] items-center gap-3 rounded-card border border-line px-4 text-left hover:bg-elevated active:bg-elevated disabled:opacity-50"
             >
               <span aria-hidden="true" className="text-xl">{l.flag}</span>
               <span className="min-w-0 flex-1">

@@ -3,7 +3,7 @@ import { getCurrentUser } from "@/server/auth";
 import {
   AUTOPULL, DEFAULT_MODEL, ensureFirstLaunch, getState, probe, pullModel,
 } from "@/server/ollama";
-import { skillAvailable } from "@/server/uiux";
+import { skillAvailable, skillSource } from "@/server/uiux";
 
 /**
  * Status of the local design stack: the vendored ui-ux-pro-max skill and the
@@ -20,7 +20,11 @@ export async function GET() {
   const state = await probe();
 
   return NextResponse.json({
-    skill: { available: await skillAvailable(), name: "ui-ux-pro-max" },
+    skill: {
+      available: await skillAvailable(),
+      name: "ui-ux-pro-max",
+      source: skillSource(),
+    },
     ollama: {
       available: state.available,
       modelReady: state.modelReady,

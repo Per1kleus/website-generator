@@ -184,7 +184,7 @@ export function AiSheet({
               setValue(s);
               inputRef.current?.focus();
             }}
-            className="flex min-h-[var(--spacing-touch)] items-center whitespace-nowrap rounded-full border border-line bg-surface px-4 text-sm font-medium active:bg-elevated disabled:opacity-50"
+            className="flex min-h-[var(--spacing-touch)] items-center whitespace-nowrap rounded-full border border-line bg-surface px-4 text-sm font-medium hover:bg-elevated active:bg-elevated disabled:opacity-50"
           >
             {s}
           </button>

@@ -225,7 +225,7 @@ export function CreateWizard() {
                   type="button"
                   onClick={() => setLogo(null)}
                   aria-label="Remove logo"
-                  className="flex size-11 shrink-0 items-center justify-center rounded-xl text-danger active:bg-elevated"
+                  className="flex size-11 shrink-0 items-center justify-center rounded-xl text-danger hover:bg-elevated active:bg-elevated"
                 >
                   <IconTrash size={18} />
                 </button>
@@ -235,7 +235,7 @@ export function CreateWizard() {
                 type="button"
                 disabled={logoBusy}
                 onClick={() => logoInput.current?.click()}
-                className="flex min-h-[var(--spacing-touch-lg)] w-full items-center justify-center gap-2 rounded-card border border-dashed border-line text-sm font-semibold text-brand active:bg-elevated disabled:opacity-50"
+                className="flex min-h-[var(--spacing-touch-lg)] w-full items-center justify-center gap-2 rounded-card border border-dashed border-line text-sm font-semibold text-brand hover:bg-elevated active:bg-elevated disabled:opacity-50"
               >
                 <IconImage size={18} /> {logoBusy ? "Uploading…" : "Add a logo"}
               </button>
@@ -467,9 +467,8 @@ export function CreateWizard() {
           always clear of the home indicator and the bottom tab bar. */}
       <div
         className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-canvas/95 px-4 pt-3 backdrop-blur-lg md:pl-60"
-        style={{ paddingBottom: "calc(0.75rem + var(--safe-bottom) + var(--bottomnav-h))" }}
       >
-        <div className="mx-auto flex max-w-3xl gap-3 lg:max-w-5xl">
+        <div className="mx-auto flex max-w-4xl gap-3">
           <Button variant="secondary" size="lg" onClick={back} className="flex-1">
             {step === 0 ? "Cancel" : "Back"}
           </Button>

@@ -6,7 +6,7 @@ import { ServiceWorker } from "@/components/ServiceWorker";
 export const metadata: Metadata = {
   title: { default: "Website Generator", template: "%s · Website Generator" },
   description:
-    "Generate, edit and deploy a business website or digital menu from your phone.",
+    "Research a business and generate, edit and publish its website or digital menu.",
   manifest: "/manifest.webmanifest",
   applicationName: "Website Generator",
   appleWebApp: {

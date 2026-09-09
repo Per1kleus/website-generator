@@ -336,7 +336,7 @@ export function MenuDataManager({
                 type="button"
                 onClick={() => sync(true)}
                 disabled={Boolean(busy)}
-                className="mt-2 flex min-h-[var(--spacing-touch)] w-full items-center justify-center rounded-lg text-xs font-semibold text-muted active:bg-elevated disabled:opacity-50"
+                className="mt-2 flex min-h-[var(--spacing-touch)] w-full items-center justify-center rounded-lg text-xs font-semibold text-muted hover:bg-elevated active:bg-elevated disabled:opacity-50"
               >
                 Sync and re-download all images
               </button>
@@ -508,7 +508,7 @@ export function MenuDataManager({
                   key={sheet.id}
                   type="button"
                   onClick={() => chooseSheet(sheet)}
-                  className="flex min-h-[var(--spacing-touch-lg)] items-center gap-3 rounded-card border border-line px-4 text-left active:bg-elevated"
+                  className="flex min-h-[var(--spacing-touch-lg)] items-center gap-3 rounded-card border border-line px-4 text-left hover:bg-elevated active:bg-elevated"
                 >
                   <span aria-hidden="true">📊</span>
                   <span className="min-w-0 flex-1">
@@ -531,7 +531,7 @@ export function MenuDataManager({
                   type="button"
                   disabled={Boolean(busy)}
                   onClick={() => useTab(tab)}
-                  className="flex min-h-[var(--spacing-touch-lg)] items-center gap-3 rounded-card border border-line px-4 text-left active:bg-elevated disabled:opacity-50"
+                  className="flex min-h-[var(--spacing-touch-lg)] items-center gap-3 rounded-card border border-line px-4 text-left hover:bg-elevated active:bg-elevated disabled:opacity-50"
                 >
                   <span className="min-w-0 flex-1 truncate font-semibold">{tab.title}</span>
                   <span className="shrink-0 text-xs text-muted">{tab.rowCount} rows</span>

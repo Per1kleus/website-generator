@@ -34,7 +34,7 @@ export function AppBar({
             <Link
               href={back}
               aria-label="Go back"
-              className="-ml-2 flex size-11 shrink-0 items-center justify-center rounded-full text-ink active:bg-elevated"
+              className="-ml-2 flex size-11 shrink-0 items-center justify-center rounded-full text-ink hover:bg-elevated active:bg-elevated"
             >
               <IconBack />
             </Link>
@@ -43,7 +43,7 @@ export function AppBar({
               type="button"
               onClick={() => router.back()}
               aria-label="Go back"
-              className="-ml-2 flex size-11 shrink-0 items-center justify-center rounded-full text-ink active:bg-elevated"
+              className="-ml-2 flex size-11 shrink-0 items-center justify-center rounded-full text-ink hover:bg-elevated active:bg-elevated"
             >
               <IconBack />
             </button>
@@ -71,11 +71,11 @@ type ButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> & {
 };
 
 const VARIANTS = {
-  primary: "bg-brand text-on-brand active:brightness-110",
+  primary: "bg-brand text-on-brand hover:brightness-105 active:brightness-110",
   secondary:
-    "bg-surface text-ink border border-line active:bg-elevated",
-  ghost: "bg-transparent text-ink active:bg-elevated",
-  danger: "bg-danger text-white active:brightness-110",
+    "bg-surface text-ink border border-line hover:bg-elevated active:bg-elevated",
+  ghost: "bg-transparent text-ink hover:bg-elevated active:bg-elevated",
+  danger: "bg-danger text-white hover:brightness-105 active:brightness-110",
 };
 
 export function Button({
@@ -305,7 +305,7 @@ export function BottomSheet({
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className="relative flex max-h-[88svh] w-full flex-col rounded-t-sheet bg-surface shadow-2xl outline-none sm:max-w-lg sm:rounded-sheet"
+        className="relative flex max-h-[88svh] w-full flex-col rounded-t-sheet bg-surface shadow-2xl outline-none sm:max-w-lg sm:rounded-sheet lg:max-w-2xl"
         style={{ animation: "sheet-in .22s cubic-bezier(.32,.72,0,1)" }}
       >
         {/* Grab handle: the visual cue that this panel is draggable/dismissible. */}
@@ -320,7 +320,7 @@ export function BottomSheet({
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="-mr-1 flex size-11 items-center justify-center rounded-full text-muted active:bg-elevated"
+            className="-mr-1 flex size-11 items-center justify-center rounded-full text-muted hover:bg-elevated active:bg-elevated"
           >
             <IconClose size={20} />
           </button>
@@ -411,7 +411,7 @@ export function useToast() {
       role="status"
       className="fixed inset-x-4 z-[80] mx-auto max-w-sm rounded-xl bg-ink px-4 py-3 text-center text-sm font-semibold text-canvas shadow-xl"
       style={{
-        bottom: "calc(var(--bottomnav-h) + var(--safe-bottom) + 1rem)",
+        bottom: "calc(var(--safe-bottom) + 1.25rem)",
         animation: "fade-in .2s ease-out",
       }}
     >

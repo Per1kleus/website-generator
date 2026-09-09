@@ -81,7 +81,7 @@ export function DevicePreview({
             target="_blank"
             rel="noopener noreferrer"
             aria-label="Open the website in a new tab"
-            className="flex size-11 items-center justify-center rounded-full text-muted active:bg-elevated"
+            className="flex size-11 items-center justify-center rounded-full text-muted hover:bg-elevated active:bg-elevated"
           >
             <IconExternal size={20} />
           </a>

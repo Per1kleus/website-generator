@@ -386,7 +386,7 @@ function RowEditor<T extends { id: string }>({
               type="button"
               onClick={() => onRemove(row.id)}
               aria-label={`Remove item ${i + 1}`}
-              className="mt-2 flex min-h-[var(--spacing-touch)] w-full items-center justify-center gap-1.5 rounded-lg text-xs font-semibold text-danger active:bg-elevated"
+              className="mt-2 flex min-h-[var(--spacing-touch)] w-full items-center justify-center gap-1.5 rounded-lg text-xs font-semibold text-danger hover:bg-elevated active:bg-elevated"
             >
               <IconTrash size={16} /> Remove
             </button>
@@ -396,7 +396,7 @@ function RowEditor<T extends { id: string }>({
       <button
         type="button"
         onClick={onAdd}
-        className="mt-2.5 flex min-h-[var(--spacing-touch)] w-full items-center justify-center gap-2 rounded-xl border border-dashed border-line text-sm font-semibold text-brand active:bg-elevated"
+        className="mt-2.5 flex min-h-[var(--spacing-touch)] w-full items-center justify-center gap-2 rounded-xl border border-dashed border-line text-sm font-semibold text-brand hover:bg-elevated active:bg-elevated"
       >
         <IconPlus size={18} /> Add
       </button>
@@ -493,7 +493,7 @@ function MenuEditor({
                                 ),
                               })
                             }
-                            className="mt-2 flex min-h-[var(--spacing-touch)] w-full items-center justify-center gap-1.5 rounded-lg text-xs font-semibold text-danger active:bg-elevated"
+                            className="mt-2 flex min-h-[var(--spacing-touch)] w-full items-center justify-center gap-1.5 rounded-lg text-xs font-semibold text-danger hover:bg-elevated active:bg-elevated"
                           >
                             <IconTrash size={16} /> Remove item
                           </button>

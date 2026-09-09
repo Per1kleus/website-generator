@@ -329,15 +329,28 @@ system; prices, images and chef's-choice status are structural and live outside
 the catalog, so a translation pass physically cannot alter them. No duplicate
 spreadsheet per language.
 
-## Downloadable applications
+## The Windows application
 
-The same product, packaged for people who would rather install something than
-run a server.
+The builder is a Windows desktop application: an installer, a Start Menu entry,
+its own window and its own process. No browser, no terminal, no localhost, and
+nothing for the user to install first — not Node, not Python, not Ollama.
 
-**Windows** — a `.exe` installer. It bundles the real application server and a
-Node runtime, and runs them on a loopback port on the user's own machine, so
-there is nothing to configure and nothing to keep running elsewhere. Download →
-install → open → use, with no terminal at any point.
+**First launch** sets the machine up once, behind a native setup screen: it
+inspects the computer (Windows version, CPU, RAM, GPU, VRAM, CUDA, free disk),
+installs UI/UX Pro Max with its own CLI, prepares Ollama if it is missing,
+recommends the smallest local model this machine runs comfortably, downloads it
+after the user agrees — with real byte counts — and verifies that it answers.
+Only then is the installation marked complete.
+
+**Every launch after that** is a double-click and a window: 1.1 seconds to the
+application, no downloads, no probing, no browser.
+
+An interrupted download resumes. A failed step explains itself and offers a
+retry, or continuing without the optional part. An application update never
+re-downloads a model that is already there.
+
+Full detail — the setup flow, the model ladder, what is and is not installed,
+and the limitations — is in [docs/DESKTOP.md](docs/DESKTOP.md).
 
 **Android** — an `.apk`. A phone cannot run a Node server with native modules
 and a Python subprocess, so the Android app is a client to a deployment rather
@@ -348,6 +361,7 @@ the backend address once, or the build bakes it in.
 npm run build:windows                                      # → NSIS installer
 WG_REMOTE_URL=https://example.com npm run build:android     # → APK
 npm run test:desktop                                        # 36 packaging checks
+npm run test:setup                                          # 40 first-launch checks
 ```
 
 Neither artifact contains a secret. The desktop app uses a Google **Desktop
@@ -431,9 +445,19 @@ npm run test:mobile     # 207 checks: the whole product on a phone
 npm run test:design     # 21 checks: the design engine across all its tiers
 npm run test:menu       # 47 checks: the Google Sheets menu pipeline
 npm run test:desktop    # 36 checks: the packaged desktop app
+npm run test:setup      # 40 checks: first launch, second launch, recovery
 ```
 
-The harness drives the entire workflow on a 390×844 touch viewport — including
+`test:setup` drives the real first-launch bootstrap the way the Windows shell
+does — spawning it, reading its progress, answering its questions — against a
+stub model host. It covers a first launch, an immediate second launch, a forced
+re-run that reinstalls nothing, a download killed partway and resumed, a step
+that fails and is retried or skipped, and a corrupted state file. It asserts
+that progress is real byte counts, that nothing is downloaded before the user
+chooses, that setup is never marked complete on the strength of a download
+alone, and that the state file holds no secrets.
+
+The harness drives the entire builder workflow at 1440×900 — including
 the logo upload, a two-language project, per-language editing, adding and
 removing a language after generation, export and deployment — then re-checks
 every screen and the generated website across all eight required breakpoints

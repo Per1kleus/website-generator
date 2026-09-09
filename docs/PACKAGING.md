@@ -42,6 +42,9 @@ gives "configured" and the last four characters. `/api/settings` answers 404 on
 a hosted deployment, where environment variables belong to the operator and one
 creator must not be able to rewrite them.
 
+See [DESKTOP.md](DESKTOP.md) for the application itself: the first-launch
+setup, the model recommendation and the desktop interface.
+
 ## For the person installing it
 
 **Windows** — download the `.exe`, run it, open it from the Start menu. It
@@ -85,12 +88,16 @@ npm run build:android:bundle    # .aab for Play
 
 CI does both: `.github/workflows/desktop-release.yml` builds the installer on
 `windows-latest` and the APK on `ubuntu-latest`, on a `v*` tag or on demand.
-`.github/workflows/ci.yml` runs the four QA suites on every push.
+`.github/workflows/ci.yml` runs the five QA suites and compiles the shell on
+every push.
 
 ### Prerequisites the build assumes
 
 - **Windows**: Rust (stable), the Tauri v2 prerequisites (Microsoft C++ Build
-  Tools, WebView2 — present on Windows 11), Node 22.
+  Tools, WebView2 — present on Windows 11), Node 22. The build also stages npm
+  beside the bundled Node runtime, because first-launch setup installs the
+  design system the way its own project documents (`npm install
+  ui-ux-pro-max-cli`, then `uipro init`).
 - **Android**: JDK 21, the Android SDK, Node 22. `npx cap add android` creates
   the Gradle project on first run; it is generated, not committed.
 - Optional on Windows: set `WG_PYTHON_DIR` to an embeddable Python
@@ -167,6 +174,14 @@ there is no custom URL scheme to hijack, and no
 | `src/components/LocalSettingsCard.tsx` | The Profile-screen UI for the above. Rendered only in desktop mode. |
 | `src/lib/shell.ts` | Detects whether the UI is inside Tauri, Capacitor or a browser, and opens external links the right way for each. |
 | `src/components/NativeShell.tsx` | Android hardware back button, resume and deep-link handling — via the Capacitor window global, so the web bundle gains no dependency. |
+| `desktop/bootstrap/run.mjs` | First-launch setup: reports newline-delimited JSON progress on stdout and takes answers on stdin, so the shell can render it as a native screen and a test can drive it without a window. |
+| `desktop/bootstrap/hardware.mjs` | Reads the machine — Windows version, CPU, RAM, GPU, VRAM, CUDA, free disk — so the model choice and the "only install what is missing" rule rest on facts rather than guesses. |
+| `desktop/bootstrap/models.mjs` | The model ladder and the recommendation, capped deliberately: the local model writes catalogue queries, and a larger one writes the same query for gigabytes more. |
+| `desktop/bootstrap/localai.mjs` | Detects, installs and starts Ollama, pulls a model with real byte counts, and proves the model answers before setup counts it. |
+| `desktop/bootstrap/uiux.mjs` | Installs UI/UX Pro Max with its own CLI into the app's data directory, and verifies it by running its search. |
+| `desktop/bootstrap/state.mjs` | The initialisation marker: versioned, written atomically, and never marked complete before the components verified. |
+| `scripts/setup-qa.mjs` | 40 checks over first launch, second launch, reinstall avoidance, an interrupted download, a failed step and a damaged marker. |
+| `docs/DESKTOP.md` | What the Windows application is, how first launch works, and what it does not do. |
 | `desktop/sidecar/launch.mjs` | Boots the bundled server on a free loopback port and reports `WG_READY <url>` / `WG_FAILED <reason>`. Stops on SIGTERM or stdin close, so closing the window never leaves an orphaned server. |
 | `desktop/tauri/**` | The Windows shell: window, splash, single-instance, sidecar lifecycle, NSIS bundle configuration, icons. |
 | `mobile/capacitor.config.json`, `mobile/package.json`, `mobile/android-shell/src/index.html` | The Android client: config, its own toolchain, and the first-run screen that asks for the backend address. |
@@ -181,6 +196,13 @@ there is no custom URL scheme to hijack, and no
 | File | Why |
 | --- | --- |
 | `next.config.ts` | `output: "standalone"` — the sidecar needs a self-contained server, not a `node_modules` tree. |
+| `desktop/tauri/src-tauri/src/main.rs` | Runs setup before the server, forwards its progress to the setup screen, and writes the user's answers back to it. |
+| `desktop/tauri/ui/index.html` | The native setup screen: steps, real progress, the model choice, and a plain-language failure with a retry. |
+| `desktop/sidecar/launch.mjs` (again) | Reads what setup recorded and passes it to the server as ordinary environment variables. |
+| `src/components/AppShell.tsx` | Replaced the phone tab bar with a desktop workspace sidebar that also lists the current project's screens; a drawer takes over on a narrow window. |
+| `src/components/SectionEditor.tsx` | Two panels: sections beside a live preview that refreshes on every save. |
+| `src/server/uiux.ts` | Prefers the CLI-installed skill when setup installed one, with the vendored copy as the offline floor. |
+| `scripts/mobile-qa.mjs` (again) | Drives the builder as a desktop application and holds it to the WCAG 2.2 pointer target size, while generated websites keep the 44px touch rule. |
 | `src/server/google/oauth.ts` | Added PKCE (S256) and made the client secret optional in desktop mode, so a Desktop-app client works and no secret is needed anywhere near an installer. |
 | `src/app/api/google/connect/route.ts` | On desktop, returns the consent URL for the system browser instead of navigating the app's own window — Google refuses consent inside embedded webviews. |
 | `src/app/api/google/callback/route.ts` | On desktop, renders a self-contained "you can close this tab" page instead of redirecting, because the tab is not the application. |
@@ -218,6 +240,8 @@ No new runtime dependency is added to the application itself.
 | `WG_PYTHON_DIR` | the Windows build (optional) | An embeddable Python distribution to bundle. |
 | `WG_TARGET_TRIPLE` | the Windows build (optional) | Overrides the Rust host triple when cross-building the sidecar name. |
 | `WG_REMOTE_URL` | the Android build (optional) | The `https://` deployment the APK opens. Blank means the app asks once on first run. |
+| `WG_UIUX_SKILL_DIR` | the sidecar, from the setup record | Which UI/UX Pro Max installation the generator uses. Unset means the vendored copy. |
+| `WG_OLLAMA_MODEL` | the sidecar, from the setup record | The local model the user confirmed during first-launch setup. |
 
 Existing variables (`ANTHROPIC_API_KEY`, `GOOGLE_CLIENT_ID`,
 `GOOGLE_CLIENT_SECRET`, `WG_SECRET`, `WG_DATA_DIR`, `OLLAMA_HOST`, …) keep

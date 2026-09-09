@@ -27,8 +27,31 @@ const execFileAsync = promisify(execFile);
  * exactly that gap.
  */
 
-const SKILL_DIR = path.join(process.cwd(), "vendor", "ui-ux-pro-max");
-const SEARCH = path.join(SKILL_DIR, "scripts", "search.py");
+/**
+ * Where the skill lives.
+ *
+ * Two copies can exist and both are legitimate:
+ *
+ *   installed  what `uipro init` put in the user's application data during
+ *              first-launch setup — the current release, installed the way the
+ *              skill's own project recommends.
+ *   vendored   the copy committed to this repository, so a fresh checkout and
+ *              an offline machine both generate real designs on day one.
+ *
+ * The installed copy wins when it is present; the vendored one is the floor,
+ * never a competitor. Resolution happens per call rather than at module load
+ * so a setup that finishes while the server is already running takes effect
+ * without a restart.
+ */
+const VENDORED = path.join(process.cwd(), "vendor", "ui-ux-pro-max");
+
+function skillRoot(): { dir: string; source: "installed" | "vendored" } {
+  const installed = process.env.WG_UIUX_SKILL_DIR;
+  if (installed && existsSync(path.join(installed, "scripts", "search.py"))) {
+    return { dir: installed, source: "installed" };
+  }
+  return { dir: VENDORED, source: "vendored" };
+}
 
 export type SkillDesignSystem = {
   project_name: string;
@@ -86,11 +109,6 @@ async function havePython(): Promise<boolean> {
   if (pythonChecked) return pythonOk;
   pythonChecked = true;
   try {
-    if (!existsSync(SEARCH)) {
-      console.warn("[uiux] vendored skill not found at", SEARCH);
-      pythonOk = false;
-      return false;
-    }
     await execFileAsync(pythonBin(), ["--version"], { timeout: 5000 });
     pythonOk = true;
   } catch {
@@ -101,7 +119,17 @@ async function havePython(): Promise<boolean> {
 }
 
 export async function skillAvailable(): Promise<boolean> {
+  const { dir } = skillRoot();
+  if (!existsSync(path.join(dir, "scripts", "search.py"))) {
+    console.warn("[uiux] no skill found at", dir);
+    return false;
+  }
   return havePython();
+}
+
+/** Which copy is answering, for the status card. */
+export function skillSource(): "installed" | "vendored" {
+  return skillRoot().source;
 }
 
 /* -------------------------------------------------------------------------
@@ -262,10 +290,11 @@ export async function runSkill(q: SkillQuery): Promise<SkillDesignSystem | null>
   if (!(await havePython())) return null;
 
   try {
+    const { dir: root } = skillRoot();
     const { stdout } = await execFileAsync(
       pythonBin(),
       [
-        SEARCH,
+        path.join(root, "scripts", "search.py"),
         q.query,
         "--design-system",
         "--json",
@@ -273,7 +302,7 @@ export async function runSkill(q: SkillQuery): Promise<SkillDesignSystem | null>
         "--motion", String(q.motion),
         "--density", String(q.density),
       ],
-      { cwd: SKILL_DIR, timeout: 30000, maxBuffer: 8 * 1024 * 1024 },
+      { cwd: root, timeout: 30000, maxBuffer: 8 * 1024 * 1024 },
     );
     const parsed = JSON.parse(stdout) as { design_system?: SkillDesignSystem };
     return parsed.design_system ?? null;

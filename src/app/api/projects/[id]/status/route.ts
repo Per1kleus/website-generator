@@ -18,6 +18,10 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
 
   return NextResponse.json({
     status: project.status,
+    // The workspace sidebar labels itself from these, and shows the menu
+    // screen only for a Digital Menu project.
+    name: project.business_name,
+    kind: project.site_kind,
     job: getLatestJob(id),
   });
 }

@@ -17,16 +17,19 @@ import {
 export type AssetRef = { id: string; filename: string; alt: string };
 
 /**
- * The mobile website editor (requirements 7, 8, 25).
+ * The website editor: a two-panel desktop workspace.
  *
- * A vertical list of sections, each a full-width row with a large Edit target.
- * Tapping a row opens that section's form in a bottom sheet. No canvas, no
- * hover state, no side-by-side panel, and no interaction needing a mouse.
+ * Sections on the left, the site itself on the right, large enough to judge a
+ * change by. Editing a section opens its form as a dialog over the workspace,
+ * and every save refreshes the preview, so the loop is edit → see it.
  *
- * Reordering has two independent paths: press-and-hold drag via Pointer Events
- * (touch, pen and mouse alike), and Move up / Move down buttons. The buttons
- * are not a fallback — drag is imprecise on a phone and impossible with a
- * switch device or a screen reader.
+ * On a narrow window the preview drops away and the section list takes the
+ * width — the panels are the design, and the single column is what a resized
+ * window falls back to.
+ *
+ * Reordering has two independent paths: drag via Pointer Events (mouse, pen
+ * and touch alike), and Move up / Move down buttons. The buttons are not a
+ * fallback — drag is impossible with a switch device or a screen reader.
  *
  * When more than one language is enabled a locale tab bar appears. It changes
  * which language's *text* is being edited; it never changes structure, so the
@@ -52,6 +55,8 @@ export function SectionEditor({
   const [error, setError] = useState("");
   const [warnings, setWarnings] = useState<string[]>([]);
   const [dragId, setDragId] = useState<string | null>(null);
+  /** Bumped after every save so the preview reloads with what was saved. */
+  const [previewNonce, setPreviewNonce] = useState(0);
   const { toast, toastNode } = useToast();
   const listRef = useRef<HTMLUListElement>(null);
 
@@ -73,6 +78,7 @@ export function SectionEditor({
         setSite(data.site);
         setWarnings(data.warnings ?? []);
         setDirty(false);
+        setPreviewNonce((n) => n + 1);
         toast(message);
         return true;
       } catch {
@@ -151,7 +157,7 @@ export function SectionEditor({
   const missing = locale === site.meta.defaultLocale ? [] : missingKeys(site, locale);
 
   return (
-    <AppShell>
+    <AppShell wide>
       <AppBar
         title="Edit website"
         subtitle={businessName}
@@ -163,6 +169,8 @@ export function SectionEditor({
         }
       />
 
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,26rem)_minmax(0,1fr)]">
+        <div className="min-w-0">
       {error && <Banner tone="error">{error}</Banner>}
       {warnings.length > 0 && (
         <Banner tone="warning">
@@ -191,7 +199,7 @@ export function SectionEditor({
       )}
 
       <p className="my-3 text-sm text-muted">
-        Tap a section to edit it. Drag the handle, or use the arrows, to reorder.
+        Select a section to edit it. Drag the handle, or use the arrows, to reorder.
       </p>
 
       <ul ref={listRef} className="space-y-2.5" aria-label="Website sections">
@@ -216,7 +224,7 @@ export function SectionEditor({
                   onPointerUp={onPointerUp}
                   onPointerCancel={onPointerUp}
                   style={{ touchAction: "none" }}
-                  className="flex size-11 shrink-0 cursor-grab items-center justify-center rounded-lg text-muted active:bg-elevated"
+                  className="flex size-11 shrink-0 cursor-grab items-center justify-center rounded-lg text-muted hover:bg-elevated active:bg-elevated"
                 >
                   <IconDrag size={20} />
                 </button>
@@ -224,7 +232,7 @@ export function SectionEditor({
                 <button
                   type="button"
                   onClick={() => setEditing(section)}
-                  className="flex min-h-[var(--spacing-touch)] min-w-0 flex-1 items-center gap-2.5 rounded-lg px-1 text-left active:bg-elevated"
+                  className="flex min-h-[var(--spacing-touch)] min-w-0 flex-1 items-center gap-2.5 rounded-lg px-1 text-left hover:bg-elevated active:bg-elevated"
                 >
                   <span aria-hidden="true" className="text-xl">{SECTION_EMOJI[section.type]}</span>
                   <span className="min-w-0 flex-1">
@@ -244,7 +252,7 @@ export function SectionEditor({
                   onClick={() => onMove(section.id, -1)}
                   disabled={index === 0}
                   aria-label={`Move ${title} up`}
-                  className="flex min-h-[var(--spacing-touch)] flex-1 items-center justify-center gap-1.5 rounded-lg text-xs font-semibold text-muted active:bg-elevated disabled:opacity-35"
+                  className="flex min-h-[var(--spacing-touch)] flex-1 items-center justify-center gap-1.5 rounded-lg text-xs font-semibold text-muted hover:bg-elevated active:bg-elevated disabled:opacity-35"
                 >
                   <IconUp size={16} /> Move up
                 </button>
@@ -253,7 +261,7 @@ export function SectionEditor({
                   onClick={() => onMove(section.id, 1)}
                   disabled={index === site.sections.length - 1}
                   aria-label={`Move ${title} down`}
-                  className="flex min-h-[var(--spacing-touch)] flex-1 items-center justify-center gap-1.5 rounded-lg text-xs font-semibold text-muted active:bg-elevated disabled:opacity-35"
+                  className="flex min-h-[var(--spacing-touch)] flex-1 items-center justify-center gap-1.5 rounded-lg text-xs font-semibold text-muted hover:bg-elevated active:bg-elevated disabled:opacity-35"
                 >
                   <IconDown size={16} /> Move down
                 </button>
@@ -261,7 +269,7 @@ export function SectionEditor({
                   type="button"
                   onClick={() => onToggleVisible(section.id)}
                   aria-label={`${section.visible ? "Hide" : "Show"} ${title}`}
-                  className="flex min-h-[var(--spacing-touch)] flex-1 items-center justify-center gap-1.5 rounded-lg text-xs font-semibold text-muted active:bg-elevated"
+                  className="flex min-h-[var(--spacing-touch)] flex-1 items-center justify-center gap-1.5 rounded-lg text-xs font-semibold text-muted hover:bg-elevated active:bg-elevated"
                 >
                   {section.visible ? <IconEyeOff size={16} /> : <IconEye size={16} />}
                   {section.visible ? "Hide" : "Show"}
@@ -272,26 +280,50 @@ export function SectionEditor({
         })}
       </ul>
 
-      {dirty && (
-        <Card className="mt-4">
-          <p className="mb-3 text-sm text-muted">You have unsaved changes.</p>
-          <Button block size="lg" loading={saving} onClick={() => persist(site)}>Save changes</Button>
-        </Card>
-      )}
-
-      {/* Sticky bar rather than a floating button: a FAB would cover the
-          section rows' own controls while scrolling. */}
-      <div
-        className="fixed inset-x-0 z-40 border-t border-line bg-canvas/95 px-4 pt-2.5 backdrop-blur-lg md:pl-60"
-        style={{ bottom: "calc(var(--bottomnav-h) + var(--safe-bottom))", paddingBottom: "0.625rem" }}
-      >
-        <div className="mx-auto max-w-3xl lg:max-w-5xl">
-          <Button block size="lg" onClick={() => setAiOpen(true)}>
-            <IconSparkles size={20} /> Ask AI to edit
-          </Button>
+      <div className="sticky bottom-0 z-30 mt-4 flex gap-2 border-t border-line bg-canvas/95 py-3 backdrop-blur-lg">
+            <Button className="flex-1" size="lg" onClick={() => setAiOpen(true)}>
+              <IconSparkles size={20} /> Ask AI to edit
+            </Button>
+            {dirty && (
+              <Button size="lg" variant="secondary" loading={saving} onClick={() => persist(site)}>
+                Save changes
+              </Button>
+            )}
+          </div>
         </div>
+
+        {/* The site itself, beside the controls. Hidden on a narrow window,
+            where there is no room for two panels and the preview screen is a
+            click away. */}
+        <aside className="hidden min-w-0 xl:block" aria-label="Preview">
+          <div className="sticky top-4">
+            <div className="mb-2 flex items-center justify-between">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted">
+                Live preview · {localeInfo(locale).english}
+              </p>
+              <LinkButton
+                href={`/projects/${projectId}/preview`}
+                variant="ghost"
+                className="text-xs"
+              >
+                Open full preview
+              </LinkButton>
+            </div>
+            <div className="overflow-hidden rounded-card border border-line bg-surface">
+              <iframe
+                key={`${locale}-${previewNonce}`}
+                title="Website preview"
+                src={`/api/projects/${projectId}/render?locale=${encodeURIComponent(locale)}`}
+                className="h-[calc(100svh-9rem)] w-full border-0 bg-white"
+                // The same sandbox as the full preview screen: the generated
+                // page's own scripts run, but it cannot navigate the workspace.
+                sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
+                loading="lazy"
+              />
+            </div>
+          </div>
+        </aside>
       </div>
-      <div aria-hidden="true" className="h-24" />
 
       {editing && (
         <SectionSheet

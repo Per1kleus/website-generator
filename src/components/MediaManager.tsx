@@ -175,7 +175,7 @@ export function MediaManager({
                   type="button"
                   onClick={() => remove(a)}
                   aria-label={`Remove ${a.alt || a.filename}`}
-                  className="mt-1.5 flex min-h-[var(--spacing-touch)] w-full items-center justify-center gap-1.5 rounded-lg text-xs font-semibold text-danger active:bg-elevated"
+                  className="mt-1.5 flex min-h-[var(--spacing-touch)] w-full items-center justify-center gap-1.5 rounded-lg text-xs font-semibold text-danger hover:bg-elevated active:bg-elevated"
                 >
                   <IconTrash size={16} /> Remove
                 </button>

@@ -57,6 +57,18 @@ const server = createServer((req, res) => {
   }
 
   if (req.method === "POST" && req.url?.startsWith("/api/pull")) {
+    // Remember what was actually asked for: a stub that always installs the
+    // same name would hide a caller that downloads the wrong model.
+    let requested = MODEL;
+    let pullBody = "";
+    req.on("data", (c) => (pullBody += c));
+    req.on("end", () => {
+      try {
+        requested = JSON.parse(pullBody).model || MODEL;
+      } catch {
+        /* keep the default */
+      }
+    });
     // Ollama streams newline-delimited JSON progress objects.
     res.writeHead(200, { "Content-Type": "application/x-ndjson" });
     const total = 397_000_000;
@@ -67,7 +79,7 @@ const server = createServer((req, res) => {
       res.write(JSON.stringify({ status: "downloading", completed: sent, total }) + "\n");
       if (sent >= total) {
         clearInterval(timer);
-        installed = [MODEL];
+        installed = [...new Set([...installed, requested])];
         res.write(JSON.stringify({ status: "success" }) + "\n");
         res.end();
       }

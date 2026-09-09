@@ -53,6 +53,8 @@ jobs:
         run: npm run test:menu
       - name: Desktop packaging suite
         run: npm run test:desktop
+      - name: First-launch setup suite
+        run: npm run test:setup
 
       - name: Upload QA screenshots
         if: always()

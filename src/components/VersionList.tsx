@@ -95,7 +95,7 @@ export function VersionList({
                     href={`/api/projects/${projectId}/render?version=${v.id}`}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex min-h-[var(--spacing-touch)] flex-1 items-center justify-center rounded-xl border border-line px-4 text-sm font-semibold active:bg-elevated"
+                    className="inline-flex min-h-[var(--spacing-touch)] flex-1 items-center justify-center rounded-xl border border-line px-4 text-sm font-semibold hover:bg-elevated active:bg-elevated"
                   >
                     View
                   </a>
@@ -103,7 +103,7 @@ export function VersionList({
                     type="button"
                     onClick={() => setConfirm({ action: "delete", version: v })}
                     aria-label={`Delete version ${v.label}`}
-                    className="flex size-11 shrink-0 items-center justify-center rounded-xl text-danger active:bg-elevated"
+                    className="flex size-11 shrink-0 items-center justify-center rounded-xl text-danger hover:bg-elevated active:bg-elevated"
                   >
                     <IconTrash size={18} />
                   </button>

@@ -21,7 +21,8 @@
     "desktop:dev": "npm run build && node desktop/sidecar/launch.mjs",
     "build:android": "node scripts/build-android.mjs",
     "build:android:release": "node scripts/build-android.mjs --release",
-    "build:android:bundle": "node scripts/build-android.mjs --bundle"
+    "build:android:bundle": "node scripts/build-android.mjs --bundle",
+    "test:setup": "node scripts/setup-qa.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.124.0",

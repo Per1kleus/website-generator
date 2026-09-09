@@ -5,43 +5,84 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Website Generator</title>
 <style>
-  /* Deliberately matches the application's own tokens so the splash reads as
-     the same product rather than a loading page bolted in front of it. */
-  :root { color-scheme: light dark; --bg:#f7f7f8; --ink:#14141a; --muted:#62626e; --brand:#4338ca; --line:#e2e2e7; }
+  /* Deliberately matches the application's own tokens: the setup screen is the
+     first thing a user sees, and it should read as the product rather than as
+     an installer bolted in front of it. */
+  :root {
+    color-scheme: light dark;
+    --bg:#f7f7f8; --surface:#fff; --ink:#14141a; --muted:#62626e;
+    --brand:#4338ca; --line:#e2e2e7; --ok:#0f7b45; --warn:#8a5a00;
+  }
   @media (prefers-color-scheme: dark) {
-    :root { --bg:#0d0d11; --ink:#f2f2f5; --muted:#a0a0ad; --brand:#8b83ff; --line:#2e2e38; }
+    :root {
+      --bg:#0d0d11; --surface:#16161d; --ink:#f2f2f5; --muted:#a0a0ad;
+      --brand:#8b83ff; --line:#2e2e38; --ok:#4ade80; --warn:#fbbf24;
+    }
   }
   * { box-sizing: border-box; }
   html, body { height: 100%; margin: 0; }
   body {
     display: grid; place-items: center; background: var(--bg); color: var(--ink);
     font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-    -webkit-user-select: none; user-select: none;
+    -webkit-user-select: none; user-select: none; font-size: 14px;
   }
-  main { text-align: center; max-width: 26rem; padding: 2rem; }
-  .mark { width: 64px; height: 64px; margin: 0 auto 1.25rem; }
-  h1 { font-size: 1.0625rem; font-weight: 650; margin: 0 0 .35rem; }
-  p { color: var(--muted); font-size: .875rem; margin: 0; line-height: 1.55; }
+  main { width: min(34rem, 100%); padding: 2rem 1.5rem; }
+  .mark { width: 56px; height: 56px; margin: 0 auto .9rem; display: block; }
+  h1 { font-size: 1.125rem; font-weight: 650; margin: 0 0 .3rem; text-align: center; }
+  .lede { color: var(--muted); margin: 0 0 1.5rem; text-align: center; line-height: 1.55; }
+  p { margin: 0; }
+
+  ol { list-style: none; margin: 0; padding: 0; display: grid; gap: .55rem; }
+  li { display: grid; grid-template-columns: 1.25rem 1fr; gap: .65rem; align-items: start; }
+  .icon { width: 1.25rem; height: 1.25rem; display: grid; place-items: center; margin-top: .1rem; }
+  .title { font-weight: 600; }
+  .detail { color: var(--muted); font-size: .8125rem; line-height: 1.5; margin-top: .15rem; }
+  .detail dl { display: grid; grid-template-columns: auto 1fr; gap: .1rem .75rem; margin: .25rem 0 0; }
+  .detail dt { color: var(--muted); }
+  .detail dd { margin: 0; color: var(--ink); }
+  li[data-state="pending"] { opacity: .45; }
+  li[data-state="done"] .icon, li[data-state="skipped"] .icon { color: var(--ok); }
+  li[data-state="failed"] .icon { color: var(--warn); }
+
   .spinner {
-    width: 20px; height: 20px; margin: 1.5rem auto 0; border-radius: 50%;
+    width: 14px; height: 14px; border-radius: 50%;
     border: 2px solid var(--line); border-top-color: var(--brand);
     animation: spin .8s linear infinite;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
-  @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 4s; } }
-  .error { display: none; }
-  body.failed .loading { display: none; }
-  body.failed .error { display: block; }
-  .reason {
-    margin-top: 1rem; padding: .75rem 1rem; border-radius: .75rem;
-    background: color-mix(in srgb, var(--ink) 6%, transparent);
-    font-size: .8125rem; color: var(--muted); word-break: break-word;
+  @media (prefers-reduced-motion: reduce) { .spinner { animation: none; border-top-color: var(--line); } }
+
+  .bar { height: 8px; border-radius: 99px; background: var(--line); overflow: hidden; margin-top: .5rem; }
+  .bar > i { display: block; height: 100%; background: var(--brand); width: 0; transition: width .25s ease; }
+  /* No byte count from the operation means no percentage is invented: the bar
+     sweeps instead of pretending to know how far along it is. */
+  .bar.indeterminate > i { width: 35%; animation: sweep 1.4s ease-in-out infinite; }
+  @keyframes sweep { 0% { margin-left: -35%; } 100% { margin-left: 100%; } }
+  @media (prefers-reduced-motion: reduce) { .bar.indeterminate > i { animation: none; width: 100%; opacity: .35; } }
+
+  .card {
+    background: var(--surface); border: 1px solid var(--line); border-radius: .9rem;
+    padding: 1.1rem; margin-top: 1.25rem;
   }
+  .card h2 { font-size: .9375rem; margin: 0 0 .5rem; }
+  .why { color: var(--muted); font-size: .8125rem; line-height: 1.55; }
+  .row { display: flex; gap: .6rem; flex-wrap: wrap; margin-top: 1rem; }
   button {
-    margin-top: 1.25rem; min-height: 2.75rem; padding: 0 1.5rem; border: 0;
-    border-radius: .75rem; background: var(--brand); color: var(--bg);
-    font: inherit; font-weight: 650; cursor: pointer;
+    min-height: 2.5rem; padding: 0 1.1rem; border-radius: .7rem; border: 1px solid var(--line);
+    background: var(--surface); color: var(--ink); font: inherit; font-weight: 600; cursor: pointer;
   }
+  button.primary { background: var(--brand); color: #fff; border-color: transparent; }
+  button:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+
+  .choice { display: grid; gap: .5rem; margin-top: .75rem; }
+  .choice label {
+    display: grid; grid-template-columns: auto 1fr; gap: .6rem; align-items: start;
+    border: 1px solid var(--line); border-radius: .7rem; padding: .7rem .85rem; cursor: pointer;
+  }
+  .choice label:has(input:checked) { border-color: var(--brand); }
+  .choice .meta { color: var(--muted); font-size: .8125rem; }
+  .note { color: var(--muted); font-size: .8125rem; margin-top: 1rem; text-align: center; }
+  [hidden] { display: none !important; }
 </style>
 </head>
 <body>
@@ -56,32 +97,287 @@
     <rect x="148" y="308" width="120" height="46" rx="23" fill="#4338ca"/>
   </svg>
 
-  <div class="loading">
-    <h1>Starting Website Generator</h1>
-    <p>Just a moment.</p>
-    <div class="spinner" role="status" aria-label="Starting"></div>
-  </div>
+  <h1 id="heading">Starting Website Generator</h1>
+  <p class="lede" id="lede">Just a moment.</p>
 
-  <div class="error" role="alert">
-    <h1>Website Generator could not start</h1>
-    <p>The application service on this computer did not start.</p>
-    <div class="reason" id="reason"></div>
-    <button type="button" onclick="location.reload()">Try again</button>
-  </div>
+  <ol id="steps" aria-live="polite"></ol>
+
+  <!-- Model confirmation. Nothing is downloaded before this is answered. -->
+  <section class="card" id="model-card" hidden>
+    <h2 id="model-title">Recommended local AI</h2>
+    <div class="detail"><dl id="model-hardware"></dl></div>
+    <p class="why" id="model-why"></p>
+    <div class="choice" id="model-choices" hidden></div>
+    <div class="row">
+      <button type="button" class="primary" id="model-accept">Use recommended model</button>
+      <button type="button" id="model-other">Choose another</button>
+      <button type="button" id="model-skip">Skip for now</button>
+    </div>
+    <p class="note" id="model-note"></p>
+  </section>
+
+  <!-- Any failure: what went wrong, in words, with a way forward. -->
+  <section class="card" id="error-card" hidden role="alert">
+    <h2 id="error-title">Something did not finish</h2>
+    <p class="why" id="error-message"></p>
+    <div class="row">
+      <button type="button" class="primary" id="error-retry">Try again</button>
+      <button type="button" id="error-skip" hidden>Continue without it</button>
+    </div>
+  </section>
+
+  <p class="note" id="internet">Setup needs an internet connection this once. Afterwards the local AI works offline.</p>
 </main>
 
 <script type="module">
-  // Plain, human wording — never a stack trace. The shell emits the reason.
-  try {
-    const { listen } = window.__TAURI__.event;
-    await listen("wg://failed", (event) => {
-      document.getElementById("reason").textContent =
-        String(event.payload ?? "").trim() ||
-        "Unable to start the service. Please try again.";
-      document.body.classList.add("failed");
+  const tauri = window.__TAURI__;
+  const el = (id) => document.getElementById(id);
+  const steps = el("steps");
+  const nodes = new Map();
+
+  const ICONS = {
+    pending: "○",
+    running: null, // a spinner element, not a glyph
+    done: "✓",
+    skipped: "✓",
+    failed: "!",
+  };
+
+  function step(id, title) {
+    let node = nodes.get(id);
+    if (!node) {
+      const li = document.createElement("li");
+      li.dataset.state = "pending";
+      li.innerHTML = '<span class="icon"></span><span><span class="title"></span><span class="detail"></span></span>';
+      steps.append(li);
+      node = {
+        li,
+        icon: li.querySelector(".icon"),
+        title: li.querySelector(".title"),
+        detail: li.querySelector(".detail"),
+      };
+      nodes.set(id, node);
+    }
+    if (title) node.title.textContent = title;
+    return node;
+  }
+
+  function setState(id, state) {
+    const node = step(id);
+    node.li.dataset.state = state;
+    node.icon.textContent = "";
+    if (state === "running") {
+      const spinner = document.createElement("span");
+      spinner.className = "spinner";
+      node.icon.append(spinner);
+    } else {
+      node.icon.textContent = ICONS[state] ?? "";
+    }
+  }
+
+  /** Detail arrives either as a sentence or as label/value pairs. */
+  function setDetail(id, detail) {
+    const node = step(id);
+    node.detail.textContent = "";
+    if (!detail) return;
+    if (Array.isArray(detail)) {
+      const dl = document.createElement("dl");
+      for (const [label, value] of detail) {
+        const dt = document.createElement("dt");
+        dt.textContent = label;
+        const dd = document.createElement("dd");
+        dd.textContent = value;
+        dl.append(dt, dd);
+      }
+      node.detail.append(dl);
+    } else {
+      node.detail.textContent = String(detail);
+    }
+  }
+
+  function setProgress(id, percent, detail) {
+    const node = step(id);
+    let bar = node.detail.querySelector(".bar");
+    if (!bar) {
+      node.detail.textContent = "";
+      const line = document.createElement("span");
+      line.className = "line";
+      bar = document.createElement("span");
+      bar.className = "bar";
+      bar.innerHTML = "<i></i>";
+      node.detail.append(line, bar);
+    }
+    node.detail.querySelector(".line").textContent = detail ?? "";
+    if (percent == null) {
+      bar.classList.add("indeterminate");
+      bar.firstElementChild.style.width = "";
+    } else {
+      bar.classList.remove("indeterminate");
+      bar.firstElementChild.style.width = `${percent}%`;
+    }
+  }
+
+  const HEADINGS = {
+    "first-launch": ["Setting up your application", "This happens once. It takes a few minutes."],
+    "resume-download": ["Finishing your setup", "Continuing the download that was interrupted."],
+    update: ["Updating your application", "Only what changed is installed."],
+  };
+
+  function answer(id, payload) {
+    tauri.core.invoke("setup_answer", { line: JSON.stringify({ id, ...payload }) });
+  }
+
+  /* --------------------------------------------------------------- events */
+
+  function onEvent(event) {
+    switch (event.t) {
+      case "begin": {
+        const [heading, lede] = HEADINGS[event.reason] ?? HEADINGS["first-launch"];
+        el("heading").textContent = heading;
+        el("lede").textContent = lede;
+        break;
+      }
+      case "step":
+        step(event.id, event.title);
+        setState(event.id, event.state);
+        if (event.state !== "running") setDetail(event.id, event.detail);
+        break;
+      case "progress":
+        setProgress(event.id, event.percent, event.detail);
+        break;
+      case "ask":
+        if (event.kind === "model") askModel(event);
+        else askRetry(event);
+        break;
+      case "failed":
+        setState(event.id, "failed");
+        break;
+      case "done":
+        el("heading").textContent = "Opening Website Generator";
+        el("lede").textContent = "";
+        el("internet").hidden = true;
+        break;
+      case "server-failed":
+        showError("Website Generator could not start", event.message, { retryable: true });
+        break;
+    }
+  }
+
+  /* ------------------------------------------------------- model question */
+
+  function askModel(event) {
+    const card = el("model-card");
+    const hardware = el("model-hardware");
+    hardware.textContent = "";
+    // Only what bears on the choice: the full inventory is already listed in
+    // the step above, and repeating it here just makes the card harder to read.
+    const relevant = (event.hardware ?? []).filter(([label]) =>
+      ["Memory", "Graphics"].includes(label),
+    );
+    for (const [label, value] of relevant) {
+      const dt = document.createElement("dt");
+      dt.textContent = label;
+      const dd = document.createElement("dd");
+      dd.textContent = value;
+      hardware.append(dt, dd);
+    }
+
+    el("model-title").textContent = event.resuming
+      ? "Continue the download"
+      : event.changed
+        ? "A different local AI suits this computer"
+        : "Recommended local AI";
+    el("model-why").textContent =
+      `${event.recommended.label} — about ${event.recommended.downloadGb} GB to download. ${event.why}`;
+    el("model-note").textContent = "Nothing is downloaded until you choose.";
+
+    const choices = el("model-choices");
+    choices.textContent = "";
+    choices.hidden = true;
+    for (const option of event.options ?? []) {
+      const label = document.createElement("label");
+      const input = document.createElement("input");
+      input.type = "radio";
+      input.name = "model";
+      input.value = option.id;
+      input.checked = option.id === event.recommended.id;
+      input.disabled = !option.fits;
+      const text = document.createElement("span");
+      const name = document.createElement("span");
+      name.className = "title";
+      name.textContent = `${option.label} · ${option.downloadGb} GB`;
+      const meta = document.createElement("span");
+      meta.className = "meta";
+      meta.textContent = option.fits
+        ? `${option.summary}${option.comfortable ? "" : " Heavier than this computer is comfortable with."}`
+        : "Not enough free disk space for this one.";
+      text.append(name, document.createElement("br"), meta);
+      label.append(input, text);
+      choices.append(label);
+    }
+
+    card.hidden = false;
+    el("model-accept").focus();
+
+    el("model-other").onclick = () => {
+      choices.hidden = false;
+      el("model-other").hidden = true;
+    };
+    el("model-accept").onclick = () => {
+      const picked = choices.querySelector("input:checked")?.value ?? event.recommended.id;
+      card.hidden = true;
+      answer(event.id, { answer: { model: picked } });
+    };
+    el("model-skip").onclick = () => {
+      card.hidden = true;
+      answer(event.id, { skip: true });
+    };
+  }
+
+  /* ------------------------------------------------------- retry question */
+
+  function askRetry(event) {
+    showError("Something did not finish", event.message, {
+      retryable: true,
+      canSkip: event.canSkip,
+      onRetry: () => answer(event.id, { retry: true }),
+      onSkip: () => answer(event.id, { skip: true }),
     });
+  }
+
+  function showError(title, message, { canSkip = false, onRetry, onSkip } = {}) {
+    const card = el("error-card");
+    el("error-title").textContent = title;
+    el("error-message").textContent =
+      String(message ?? "").trim() || "Something went wrong. Please try again.";
+    const retry = el("error-retry");
+    const skip = el("error-skip");
+    skip.hidden = !canSkip;
+    card.hidden = false;
+    retry.onclick = () => {
+      card.hidden = true;
+      if (onRetry) onRetry();
+      else location.reload();
+    };
+    skip.onclick = () => {
+      card.hidden = true;
+      onSkip?.();
+    };
+    retry.focus();
+  }
+
+  /* ----------------------------------------------------------------- wire */
+
+  try {
+    await tauri.event.listen("wg://setup", (e) => onEvent(e.payload));
+    await tauri.event.listen("wg://failed", (e) =>
+      showError("Website Generator could not start", e.payload),
+    );
+    // The shell holds any events emitted before this listener existed.
+    await tauri.core.invoke("setup_ready");
   } catch {
-    // Opened outside the shell (during development): leave the splash as-is.
+    // Opened outside the shell (a developer with the file open): leave the
+    // static screen rather than throwing into an empty window.
   }
 </script>
 </body>

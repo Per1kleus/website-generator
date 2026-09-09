@@ -1,12 +1,18 @@
 /**
- * Mobile QA harness (requirements 23 and 24).
+ * Application QA harness.
  *
- * Drives the entire product workflow on a phone-sized viewport, then re-checks
- * every screen across the full breakpoint list. Two classes of assertion:
+ * Two products are tested here, to two different standards, and keeping them
+ * apart is the point:
  *
- *   1. Flow      — each step of the workflow can actually be completed by touch
- *   2. Layout    — no horizontal overflow, and every interactive target is at
- *                  least 44x44 CSS px, at each required width
+ *   The builder is a Windows desktop application. It is driven at a desktop
+ *   window size, must show its sidebar rather than a phone tab bar, and its
+ *   controls are held to the WCAG 2.2 pointer target minimum of 24px. It must
+ *   also survive being resized down to a narrow window — that is
+ *   responsiveness, not a phone layout.
+ *
+ *   The websites it generates are visited by strangers on phones. They keep
+ *   the strict mobile rules: 44px touch targets, no horizontal overflow at any
+ *   width, and a layout that works on a 320px screen.
  *
  * Run with: node scripts/mobile-qa.mjs [baseUrl]
  */
@@ -27,6 +33,8 @@ const SHOTS = "qa-screenshots";
 // The exact widths the requirements name, plus the shell breakpoints.
 const WIDTHS = [320, 375, 390, 430, 768, 1024, 1280, 1440];
 const MIN_TARGET = 44;
+/** WCAG 2.2 target size (minimum) for a pointer-driven interface. */
+const POINTER_TARGET = 24;
 
 
 /**
@@ -89,8 +97,14 @@ async function checkNoHorizontalOverflow(page, label) {
   );
 }
 
-/** Fails if any visible control is smaller than the 44px touch minimum. */
-async function checkTouchTargets(page, label) {
+/**
+ * Fails if any visible control is smaller than the given minimum.
+ *
+ * 44px for anything a stranger taps on a phone — a generated website, or the
+ * builder in a window narrow enough that touch is plausible. 24px for the
+ * builder on a desktop window, which is the WCAG 2.2 minimum for a pointer.
+ */
+async function checkTargets(page, label, min = MIN_TARGET) {
   const small = await page.evaluate((min) => {
     const out = [];
     const sel = 'button, a[href], input:not([type="hidden"]), select, textarea, [role="button"], [role="radio"], [role="checkbox"]';
@@ -114,10 +128,10 @@ async function checkTouchTargets(page, label) {
       }
     }
     return out;
-  }, MIN_TARGET);
+  }, min);
 
   record(
-    `${label}: touch targets >= ${MIN_TARGET}px`,
+    `${label}: targets >= ${min}px`,
     small.length === 0,
     small.length ? small.map((s) => `<${s.tag}> "${s.label}" ${s.w}x${s.h}`).join("; ") : "",
   );
@@ -127,28 +141,24 @@ async function main() {
   mkdirSync(SHOTS, { recursive: true });
   const browser = await chromium.launch(EXEC ? { executablePath: EXEC } : {});
 
-  // A realistic phone: iPhone 14-class viewport, touch, mobile UA.
-  const phone = await browser.newContext({
-    viewport: { width: 390, height: 844 },
-    deviceScaleFactor: 3,
-    isMobile: true,
-    hasTouch: true,
-    userAgent:
-      "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+  // A desktop application window, which is what the builder now is.
+  const desktop = await browser.newContext({
+    viewport: { width: 1440, height: 900 },
+    deviceScaleFactor: 1,
   });
-  const page = await phone.newPage();
+  const page = await desktop.newPage();
 
   const consoleErrors = [];
   page.on("console", (m) => m.type() === "error" && consoleErrors.push(m.text()));
   page.on("pageerror", (e) => consoleErrors.push(String(e)));
 
-  console.log(`\n=== Mobile workflow at 390x844 (${BASE}) ===\n`);
+  console.log(`\n=== Builder workflow at 1440x900 (${BASE}) ===\n`);
 
   /* 1. Sign up ---------------------------------------------------------- */
   const email = `qa+${Date.now()}@example.com`;
   await page.goto(`${BASE}/signup`, { waitUntil: "networkidle" });
   await checkNoHorizontalOverflow(page, "signup");
-  await checkTouchTargets(page, "signup");
+  await checkTargets(page, "signup", POINTER_TARGET);
 
   await page.getByLabel("Your name").fill("QA Tester");
   await page.getByLabel("Email").fill(email);
@@ -162,15 +172,18 @@ async function main() {
   await page.waitForLoadState("networkidle");
   await checkNoHorizontalOverflow(page, "dashboard (empty)");
   await page.screenshot({ path: `${SHOTS}/02-dashboard-empty.png` });
-  // Two navs exist: the desktop rail (hidden on phones) and the bottom tab bar.
-  // Assert the phone gets the bottom bar and NOT the desktop sidebar.
-  const bottomNav = page.locator('nav[aria-label="Main"].md\\:hidden');
-  const sideRail = page.locator('nav[aria-label="Main"].md\\:fixed');
-  record("bottom tab bar is shown on a phone", await bottomNav.isVisible());
-  record("desktop sidebar is NOT forced onto a phone", !(await sideRail.isVisible()));
+  // A desktop application navigates from a persistent sidebar.
+  const sidebar = page.locator('nav[aria-label="Main"]').first();
+  record("the workspace sidebar is visible", await sidebar.isVisible());
   record(
-    "bottom nav has Projects / Create / Profile",
-    (await bottomNav.locator("a").count()) === 3,
+    "it lists the application's destinations",
+    (await sidebar.getByRole("link", { name: "Projects" }).count()) === 1 &&
+      (await sidebar.getByRole("link", { name: "New project" }).count()) === 1 &&
+      (await sidebar.getByRole("link", { name: "Profile" }).count()) === 1,
+  );
+  record(
+    "no phone tab bar is left behind",
+    (await page.locator('nav[aria-label="Main"] a[href="/projects/new"]').count()) <= 1,
   );
 
   /* 3. Create project (4-step wizard) ------------------------------------ */
@@ -178,7 +191,7 @@ async function main() {
   await page.waitForURL(/\/projects\/new/);
   await page.waitForLoadState("networkidle");
   await checkNoHorizontalOverflow(page, "wizard step 1");
-  await checkTouchTargets(page, "wizard step 1");
+  await checkTargets(page, "wizard step 1", POINTER_TARGET);
 
   await page.getByLabel("Business name").fill("Caffè Verde");
   await page.getByLabel("What kind of business is it?").fill("Coffee shop");
@@ -210,14 +223,14 @@ async function main() {
   await page.getByRole("button", { name: "Continue" }).click();
 
   // Step 3: website type
-  await checkTouchTargets(page, "wizard step 3");
+  await checkTargets(page, "wizard step 3", POINTER_TARGET);
   await page.getByRole("radio", { name: /Digital menu/ }).click();
   await page.screenshot({ path: `${SHOTS}/05-wizard-type.png` });
   await page.getByRole("button", { name: "Continue" }).click();
 
   // Step 4: languages — pick Greek as the main language and add English, so
   // the rest of the run exercises the real multi-language path.
-  await checkTouchTargets(page, "wizard step 4 (languages)");
+  await checkTargets(page, "wizard step 4 (languages)", POINTER_TARGET);
   await page.getByRole("radio", { name: /Greek/ }).click();
   // Choosing a new main language keeps the previous one as a second language,
   // so only tick English if it is not already selected.
@@ -242,9 +255,9 @@ async function main() {
   await checkNoHorizontalOverflow(page, "generation");
   await page.screenshot({ path: `${SHOTS}/07-generating.png` });
 
-  // Requirement 5: generation continues while the app is backgrounded.
-  // Simulate leaving by opening a second tab and hiding this one.
-  const other = await phone.newPage();
+  // Generation continues while the window is not in front. Simulate leaving
+  // by opening a second window and hiding this one.
+  const other = await desktop.newPage();
   await other.goto(`${BASE}/account`);
   await new Promise((r) => setTimeout(r, 2500));
   await other.close();
@@ -260,9 +273,13 @@ async function main() {
   /* 5. Preview with device selector -------------------------------------- */
   await page.goto(`${projectUrl}/preview`, { waitUntil: "networkidle" });
   await checkNoHorizontalOverflow(page, "preview");
-  await checkTouchTargets(page, "preview");
-  const mobileSelected = await page.getByRole("radio", { name: "Mobile" }).getAttribute("aria-checked");
-  record("preview defaults to Mobile on a phone", mobileSelected === "true");
+  await checkTargets(page, "preview", POINTER_TARGET);
+  const devices = await page.getByRole("radio").count();
+  record(
+    "the preview offers phone, tablet and desktop widths",
+    devices >= 3,
+    `${devices} device options`,
+  );
 
   // The iframe must render the site at a real mobile viewport, not scaled down.
   const frame = page.frameLocator("iframe");
@@ -338,7 +355,7 @@ async function main() {
   /* 5c. Language management ---------------------------------------------- */
   await page.goto(`${projectUrl}/languages`, { waitUntil: "networkidle" });
   await checkNoHorizontalOverflow(page, "languages");
-  await checkTouchTargets(page, "languages");
+  await checkTargets(page, "languages", POINTER_TARGET);
   await page.screenshot({ path: `${SHOTS}/09c-languages.png` });
   record(
     "languages screen lists both enabled languages",
@@ -384,7 +401,7 @@ async function main() {
   /* 6. Editor + reordering ----------------------------------------------- */
   await page.goto(`${projectUrl}/edit`, { waitUntil: "networkidle" });
   await checkNoHorizontalOverflow(page, "editor");
-  await checkTouchTargets(page, "editor");
+  await checkTargets(page, "editor", POINTER_TARGET);
   await page.screenshot({ path: `${SHOTS}/11-editor.png` });
 
   const before = await page.locator("[data-section-row]").allInnerTexts();
@@ -397,7 +414,7 @@ async function main() {
   await page.locator("[data-section-row] button").filter({ hasText: /Hero|Menu/ }).first().click();
   await page.getByRole("dialog").waitFor();
   await page.waitForTimeout(400);
-  await checkTouchTargets(page, "section sheet");
+  await checkTargets(page, "section sheet", POINTER_TARGET);
   await page.screenshot({ path: `${SHOTS}/12-section-sheet.png` });
   const headline = page.getByLabel("Headline");
   if (await headline.isVisible().catch(() => false)) {
@@ -423,7 +440,7 @@ async function main() {
   await page.getByRole("dialog").waitFor();
   // Let the sheet finish sliding in before measuring or capturing it.
   await page.waitForTimeout(400);
-  await checkTouchTargets(page, "AI sheet");
+  await checkTargets(page, "AI sheet", POINTER_TARGET);
   await page.screenshot({ path: `${SHOTS}/13-ai-sheet.png` });
   await page.getByRole("button", { name: "Make it more minimal" }).click();
   await page.getByRole("button", { name: "Send" }).click();
@@ -434,7 +451,7 @@ async function main() {
   /* 8. Image upload ------------------------------------------------------ */
   await page.goto(`${projectUrl}/media`, { waitUntil: "networkidle" });
   await checkNoHorizontalOverflow(page, "media");
-  await checkTouchTargets(page, "media");
+  await checkTargets(page, "media", POINTER_TARGET);
   // Scope to real <button>s: the hidden <input type="file"> elements also
   // expose a "Choose file" accessible name.
   const sourceButtons = page.locator("button").filter({ hasText: /Take photo|Choose from gallery|Choose file/ });
@@ -456,7 +473,7 @@ async function main() {
   /* 9. Design controls --------------------------------------------------- */
   await page.goto(`${projectUrl}/design`, { waitUntil: "networkidle" });
   await checkNoHorizontalOverflow(page, "design");
-  await checkTouchTargets(page, "design");
+  await checkTargets(page, "design", POINTER_TARGET);
   await page.getByRole("button", { name: /Use a palette/ }).click();
   await page.getByRole("dialog").waitFor();
   await page.screenshot({ path: `${SHOTS}/16-design-palette.png` });
@@ -478,7 +495,7 @@ async function main() {
   /* 11. Export ----------------------------------------------------------- */
   await page.goto(`${projectUrl}/export`, { waitUntil: "networkidle" });
   await checkNoHorizontalOverflow(page, "export");
-  await checkTouchTargets(page, "export");
+  await checkTargets(page, "export", POINTER_TARGET);
   const download = await Promise.all([
     page.waitForEvent("download", { timeout: 30000 }),
     page.getByRole("link", { name: "Export ZIP" }).click(),
@@ -504,7 +521,7 @@ async function main() {
   /* 12. Deploy ----------------------------------------------------------- */
   await page.goto(`${projectUrl}/deploy`, { waitUntil: "networkidle" });
   await checkNoHorizontalOverflow(page, "deploy");
-  await checkTouchTargets(page, "deploy");
+  await checkTargets(page, "deploy", POINTER_TARGET);
   await page.getByRole("button", { name: "Deploy" }).click();
   await page.getByText("Your website is live").waitFor({ timeout: 60000 });
   record("deployment reaches Live from a phone", true);
@@ -542,7 +559,7 @@ async function main() {
     const guestPage = await guest.newPage();
     await guestPage.goto(`${liveUrl.replace(/\/$/, "")}/el/`, { waitUntil: "networkidle" });
     await checkNoHorizontalOverflow(guestPage, "generated site (390px)");
-    await checkTouchTargets(guestPage, "generated site (390px)");
+    await checkTargets(guestPage, "generated site (390px)", MIN_TARGET);
     await guestPage.screenshot({ path: `${SHOTS}/20-live-site.png`, fullPage: true });
 
     // The generated site must be responsive across the whole range too.
@@ -606,6 +623,67 @@ async function main() {
   await page.screenshot({ path: `${SHOTS}/22-second-business.png` });
   await checkNoHorizontalOverflow(page, "second business preview");
 
+  /* 13b. The desktop workspace -------------------------------------------- */
+  console.log(`\n=== Desktop workspace ===\n`);
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(secondUrl, { waitUntil: "networkidle" });
+  await page.waitForTimeout(900);
+  record(
+    "a full-website project is not offered the menu-data screen",
+    (await page
+      .locator('nav[aria-label="Main"]')
+      .first()
+      .getByRole("link", { name: "Menu data" })
+      .count()) === 0,
+  );
+
+  await page.goto(`${projectUrl}/edit`, { waitUntil: "networkidle" });
+  await page.waitForTimeout(800);
+
+  const editorPreview = page.locator('aside[aria-label="Preview"] iframe');
+  record("the editor shows the site beside the controls", await editorPreview.isVisible());
+  const previewBox = await editorPreview.boundingBox();
+  record(
+    "the preview panel is a workspace, not a thumbnail",
+    (previewBox?.width ?? 0) > 500 && (previewBox?.height ?? 0) > 500,
+    `${Math.round(previewBox?.width ?? 0)}x${Math.round(previewBox?.height ?? 0)}`,
+  );
+
+  const projectNav = page.locator('nav[aria-label="Main"]').first();
+  record(
+    "the sidebar navigates within the project",
+    (await projectNav.getByRole("link", { name: "Design" }).count()) === 1 &&
+      (await projectNav.getByRole("link", { name: "Versions" }).count()) === 1 &&
+      (await projectNav.getByRole("link", { name: "Publish" }).count()) === 1,
+  );
+  record(
+    "a Digital Menu project is offered its menu-data screen",
+    (await projectNav.getByRole("link", { name: "Menu data" }).count()) === 1,
+  );
+  await page.screenshot({ path: `${SHOTS}/24-desktop-workspace.png` });
+
+  // Resizing the window must degrade, not break.
+  await page.setViewportSize({ width: 900, height: 800 });
+  await page.waitForTimeout(300);
+  record(
+    "a narrow window hides the sidebar rather than squeezing it",
+    !(await page.locator('nav[aria-label="Main"]').first().isVisible()),
+  );
+  await page.getByRole("button", { name: "Open navigation" }).click();
+  await page.waitForTimeout(250);
+  record(
+    "the same navigation is still reachable as a drawer",
+    await page.locator('nav[aria-label="Main"]').last().getByRole("link", { name: "Design" }).isVisible(),
+  );
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(200);
+  record(
+    "Escape closes the drawer",
+    (await page.locator('nav[aria-label="Main"]').count()) === 1,
+  );
+  await page.setViewportSize({ width: 1440, height: 900 });
+
   /* 14. Every app screen at every required width -------------------------- */
   console.log(`\n=== App screens across breakpoints ===\n`);
   const screens = [
@@ -633,7 +711,7 @@ async function main() {
     "the design catalogue is reported as active",
     await page.getByText("ui-ux-pro-max", { exact: false }).isVisible(),
   );
-  await checkTouchTargets(page, "account");
+  await checkTargets(page, "account", POINTER_TARGET);
   await page.screenshot({ path: `${SHOTS}/23-design-engine.png` });
 
   for (const width of WIDTHS) {

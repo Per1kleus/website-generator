@@ -70,7 +70,7 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
         </h1>
         <p className="mt-1.5 text-sm text-muted">
           {isSignup
-            ? "Build a website or digital menu from your phone."
+            ? "Build a website or digital menu for a real business."
             : "Sign in to your projects."}
         </p>
       </div>

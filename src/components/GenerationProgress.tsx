@@ -196,7 +196,7 @@ export function GenerationProgress({
       {/* Shown from the very first paint, not just once polling has started. */}
       {!done && !failed && (
         <p className="mx-auto mt-8 max-w-xs text-center text-xs text-muted">
-          You can leave this screen or lock your phone. Generation keeps running
+          You can leave this screen or close the window. Generation keeps running
           and you can come back at any time.
         </p>
       )}

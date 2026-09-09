@@ -20,7 +20,7 @@
  */
 import { spawn } from "node:child_process";
 import { createServer } from "node:net";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 
@@ -96,6 +96,34 @@ async function waitForHealth(url, child, timeoutMs = 90_000) {
   return false;
 }
 
+/**
+ * What first-launch setup installed, if anything.
+ *
+ * The server reads plain environment variables, exactly as it does on a
+ * hosted deployment, so the desktop simply fills them in from what setup
+ * recorded. A missing or damaged marker means the defaults apply and the
+ * application still starts.
+ */
+function setupEnvironment(dataDir) {
+  const env = {};
+  try {
+    const marker = path.join(dataDir, "setup-state.json");
+    if (!existsSync(marker)) return env;
+    const state = JSON.parse(readFileSync(marker, "utf8"));
+    const skill = state?.uiux?.path;
+    if (skill && existsSync(path.join(skill, "scripts", "search.py"))) {
+      env.WG_UIUX_SKILL_DIR = skill;
+    }
+    // Only a model that finished downloading and answered is handed over.
+    if (state?.model?.id && state.model.pending === false) {
+      env.WG_OLLAMA_MODEL = state.model.id;
+    }
+  } catch {
+    /* the defaults are fine */
+  }
+  return env;
+}
+
 async function main() {
   const dataFlag = process.argv.indexOf("--data-dir");
   const dataDir = dataFlag > -1 ? process.argv[dataFlag + 1] : path.join(process.cwd(), "data");
@@ -125,6 +153,7 @@ async function main() {
       WG_DATA_DIR: dataDir,
       WG_SELF_ORIGIN: url,
       ...(layout.python ? { WG_PYTHON: layout.python } : {}),
+      ...setupEnvironment(dataDir),
       // Bind to loopback only: this server is for this machine, and must not
       // be reachable from the local network.
       HOSTNAME: HOST,
