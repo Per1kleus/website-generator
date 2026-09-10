@@ -257,24 +257,24 @@ try {
   const listed = (before.json?.settings ?? []).map((s) => s.key);
   record("the settings list is the allowlist, nothing more",
     JSON.stringify(listed) ===
-      JSON.stringify(["ANTHROPIC_API_KEY", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "OLLAMA_HOST"]),
+      JSON.stringify(["GEMINI_API_KEY", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "OLLAMA_HOST"]),
     listed.join(", "));
   record("a key set at launch is shown as coming from the environment",
     before.json?.settings?.find((s) => s.key === "GOOGLE_CLIENT_ID")?.fromEnvironment === true);
 
-  const KEY = "sk-ant-desktopqa-0123456789abcdef";
+  const KEY = "AIzaSyDesktopQa-0123456789abcdef";
   const saved = await api("/api/settings", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     // WG_SECRET is not on the allowlist: overwriting it would make every
     // stored Google token undecryptable, so a request may not touch it.
-    body: JSON.stringify({ ANTHROPIC_API_KEY: KEY, WG_SECRET: "hijacked" }),
+    body: JSON.stringify({ GEMINI_API_KEY: KEY, WG_SECRET: "hijacked" }),
   });
   record("a key can be saved from inside the application", saved.status === 200);
   record("the saved key is never echoed back", !saved.text.includes(KEY));
   record("it is reported by its last four characters only",
-    saved.json?.settings?.find((s) => s.key === "ANTHROPIC_API_KEY")?.hint === "••••cdef",
-    saved.json?.settings?.find((s) => s.key === "ANTHROPIC_API_KEY")?.hint ?? "");
+    saved.json?.settings?.find((s) => s.key === "GEMINI_API_KEY")?.hint === "••••cdef",
+    saved.json?.settings?.find((s) => s.key === "GEMINI_API_KEY")?.hint ?? "");
   record("a variable outside the allowlist is ignored",
     !saved.text.includes("WG_SECRET") && !saved.text.includes("hijacked"));
 

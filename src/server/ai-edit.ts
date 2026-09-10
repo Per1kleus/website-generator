@@ -1,14 +1,13 @@
 import "server-only";
-import Anthropic from "@anthropic-ai/sdk";
 import { ARCHITECTURE_IDS, architecture } from "@/lib/architectures";
 import { isSupportedLocale, LOCALES, localeInfo, type Locale } from "@/lib/locales";
 import { emptyCatalog, key, newId, type Section, type Site } from "@/lib/site";
 import { PALETTES } from "@/lib/styles";
 import { contrastRatio } from "./identity";
 import { hasApiKey } from "./research";
+import { describeError, generateText } from "./gemini";
 import { addLocale, fillMissingStrings, removeLocale } from "./translate";
 
-const MODEL = "claude-opus-5";
 
 export type EditResult = { site: Site; summary: string; changed: boolean };
 
@@ -223,7 +222,7 @@ function localEdit(site: Site, instruction: string, locale: Locale): EditResult 
     return {
       site,
       summary:
-        "Connect an Anthropic API key for free-form edits. Without one I can still change the architecture, colours, layout, languages and sections — try a suggestion.",
+        "Connect a Gemini API key for free-form edits. Without one I can still change the architecture, colours, layout, languages and sections — try a suggestion.",
       changed: false,
     };
   }
@@ -246,7 +245,6 @@ export async function aiEdit(
   if (!hasApiKey()) return localEdit(site, instruction, target);
 
   try {
-    const client = new Anthropic();
     const named = findLocale(instruction.toLowerCase());
     const scope = named && site.meta.locales.includes(named)
       ? `\n\nThe instruction names ${localeInfo(named).english}. Change ONLY i18n["${named}"]. Every other locale must come back byte-identical.`
@@ -255,30 +253,17 @@ export async function aiEdit(
       ? `\n\nThe user is editing the section with id "${focusSectionId}". "This section" means that one.`
       : "";
 
-    const stream = client.messages.stream({
-      model: MODEL,
-      max_tokens: 48000,
-      thinking: { type: "adaptive" },
-      output_config: { effort: "high" },
+    const { text: raw, refused } = await generateText({
       system: SYSTEM,
-      messages: [
-        {
-          role: "user",
-          content: `Current document:\n\n${JSON.stringify(site)}\n\nInstruction: ${instruction}${scope}${focus}\n\nReturn the complete updated JSON document, and nothing else.`,
-        },
-      ],
+      maxOutputTokens: 48000,
+      content: `Current document:\n\n${JSON.stringify(site)}\n\nInstruction: ${instruction}${scope}${focus}\n\nReturn the complete updated JSON document, and nothing else.`,
     });
 
-    const message = await stream.finalMessage();
-    if (message.stop_reason === "refusal") {
+    if (refused) {
       return { site, summary: "I can't make that particular change.", changed: false };
     }
 
-    const text = message.content
-      .filter((b): b is Anthropic.TextBlock => b.type === "text")
-      .map((b) => b.text)
-      .join("")
-      .trim();
+    const text = raw.trim();
     const start = text.indexOf("{");
     const end = text.lastIndexOf("}");
     if (start < 0 || end <= start) throw new Error("no JSON in response");
@@ -286,7 +271,7 @@ export async function aiEdit(
     const parsed = JSON.parse(text.slice(start, end + 1)) as Site;
     return { site: validateSiteDoc(parsed, site), summary: "Applied your change.", changed: true };
   } catch (err) {
-    console.error("[ai-edit] failed, falling back to local edit:", err);
+    console.error("[ai-edit] failed, falling back to local edit:", describeError(err));
     return localEdit(site, instruction, target);
   }
 }

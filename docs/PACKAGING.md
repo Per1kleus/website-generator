@@ -28,7 +28,7 @@ Nothing secret is in either artifact. This is a hard property, tested by
   runtime, and an icon.
 - The APK contains the web shell and, optionally, the **address** of the
   deployment it should open — an address, not a credential.
-- `ANTHROPIC_API_KEY`, `GOOGLE_CLIENT_SECRET`, `WG_SECRET`, Vercel and Netlify
+- `GEMINI_API_KEY`, `GOOGLE_CLIENT_SECRET`, `WG_SECRET`, Vercel and Netlify
   tokens are never staged into a build. `scripts/build-desktop.mjs` copies
   three named things and deletes `data/` before bundling.
 - The desktop OAuth client is a **Desktop app** client, which by design has no
@@ -55,7 +55,7 @@ uninstalling from Add or Remove Programs leaves it there so a reinstall keeps
 your projects.
 
 The app works immediately with no keys at all: it generates from your own
-inputs using the design catalogue. Adding an Anthropic key on the Profile
+inputs using the design catalogue. Adding a Gemini key on the Profile
 screen turns on business research, written copy and translation. Adding a
 Google client ID turns on digital menus from a Google Sheet.
 
@@ -243,7 +243,7 @@ No new runtime dependency is added to the application itself.
 | `WG_UIUX_SKILL_DIR` | the sidecar, from the setup record | Which UI/UX Pro Max installation the generator uses. Unset means the vendored copy. |
 | `WG_OLLAMA_MODEL` | the sidecar, from the setup record | The local model the user confirmed during first-launch setup. |
 
-Existing variables (`ANTHROPIC_API_KEY`, `GOOGLE_CLIENT_ID`,
+Existing variables (`GEMINI_API_KEY`, `GOOGLE_CLIENT_ID`,
 `GOOGLE_CLIENT_SECRET`, `WG_SECRET`, `WG_DATA_DIR`, `OLLAMA_HOST`, …) keep
 their meanings. On the desktop the first, second and last of those can also be
 set from the Profile screen instead.

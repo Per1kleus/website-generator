@@ -1,9 +1,7 @@
 import "server-only";
-import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import { parseMapsUrl } from "@/lib/maps";
-
-const MODEL = "claude-opus-5";
+import { generateText, hasApiKey } from "./gemini";
 
 /**
  * Business research (requirement 3).
@@ -95,9 +93,8 @@ function researchPrompt(input: {
 Research this business and return what you can verify. Leave anything you cannot verify empty.`;
 }
 
-export function hasApiKey(): boolean {
-  return Boolean(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN);
-}
+/** Re-exported so the modules that already import it from here keep working. */
+export { hasApiKey };
 
 export async function researchBusiness(input: {
   businessName: string;
@@ -121,37 +118,22 @@ export async function researchBusiness(input: {
     };
   }
 
-  const client = new Anthropic();
-  const stream = client.messages.stream({
-    model: MODEL,
-    max_tokens: 32000,
-    thinking: { type: "adaptive" },
-    output_config: { effort: "high" },
+  // Grounded in real sources: Google Search finds the business, URL context
+  // reads the pages it finds. Without them the research rule — never state
+  // what you could not verify — would have nothing to verify against.
+  const { text, refused } = await generateText({
     system: SYSTEM,
-    tools: [
-      { type: "web_search_20260209", name: "web_search", max_uses: 8 },
-      { type: "web_fetch_20260209", name: "web_fetch", max_uses: 5 },
-    ],
-    messages: [
-      {
-        role: "user",
-        content: `${researchPrompt(input)}
+    maxOutputTokens: 32000,
+    tools: [{ googleSearch: {} }, { urlContext: {} }],
+    content: `${researchPrompt(input)}
 
 When you have finished researching, output ONLY a JSON object matching this shape, and nothing else:
 {"name":"","category":"","cuisineOrSpecialty":"","location":"","address":"","phone":"","email":"","website":"","openingHours":[{"day":"","hours":""}],"priceRange":"","rating":"","reviewThemes":[""],"services":[""],"menuHighlights":[{"name":"","price":""}],"atmosphere":"","targetAudience":"","positioning":"","verifiedFields":[""],"sources":[""],"unknowns":[""],"confidence":"low"}`,
-      },
-    ],
   });
 
-  const message = await stream.finalMessage();
-  if (message.stop_reason === "refusal") {
+  if (refused) {
     return { ...emptyProfile(), name: input.businessName, unknowns: ["Research was declined."] };
   }
-
-  const text = message.content
-    .filter((b): b is Anthropic.TextBlock => b.type === "text")
-    .map((b) => b.text)
-    .join("");
 
   const start = text.indexOf("{");
   const end = text.lastIndexOf("}");

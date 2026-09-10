@@ -63,7 +63,7 @@ export function publicConfig(): PublicConfig {
     mode: mode(),
     version: process.env.WG_VERSION || "0.0.0",
     googleConfigured: Boolean(process.env.GOOGLE_CLIENT_ID),
-    aiConfigured: Boolean(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN),
+    aiConfigured: Boolean(process.env.GEMINI_API_KEY),
     oauthFlow: isDesktop() ? "system-browser" : "web-redirect",
   };
 }

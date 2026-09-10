@@ -55,6 +55,8 @@ jobs:
         run: npm run test:desktop
       - name: First-launch setup suite
         run: npm run test:setup
+      - name: Gemini suite
+        run: npm run test:gemini
 
       - name: Upload QA screenshots
         if: always()

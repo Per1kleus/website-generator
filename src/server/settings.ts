@@ -27,7 +27,7 @@ import { isDesktop } from "@/server/runtime";
  * request is shaped.
  */
 export const EDITABLE_SETTINGS = [
-  "ANTHROPIC_API_KEY",
+  "GEMINI_API_KEY",
   "GOOGLE_CLIENT_ID",
   "GOOGLE_CLIENT_SECRET",
   "OLLAMA_HOST",
@@ -36,7 +36,7 @@ export const EDITABLE_SETTINGS = [
 export type SettingKey = (typeof EDITABLE_SETTINGS)[number];
 
 /** Which of them are credentials, and so are never echoed back in full. */
-const SECRET_KEYS = new Set<SettingKey>(["ANTHROPIC_API_KEY", "GOOGLE_CLIENT_SECRET"]);
+const SECRET_KEYS = new Set<SettingKey>(["GEMINI_API_KEY", "GOOGLE_CLIENT_SECRET"]);
 
 function storePath(): string {
   const dir = process.env.WG_DATA_DIR ?? path.join(process.cwd(), "data");

@@ -24,10 +24,10 @@ type Setting = {
  */
 const FIELDS: { key: string; label: string; hint: string; placeholder: string }[] = [
   {
-    key: "ANTHROPIC_API_KEY",
-    label: "Anthropic API key",
+    key: "GEMINI_API_KEY",
+    label: "Gemini API key",
     hint: "Turns on business research, written copy and translation. The app works without it.",
-    placeholder: "sk-ant-…",
+    placeholder: "AIza…",
   },
   {
     key: "GOOGLE_CLIENT_ID",

@@ -46,7 +46,8 @@ starts the download in the background, so a phone user is never waiting on it.
 | `WG_OLLAMA_AUTOPULL` | Set to `0` to never download a model automatically. |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Enables the Google Sheets menu source for Digital Menu projects. |
 | `WG_SECRET` | Encrypts stored Google tokens at rest. **Set this** on any deployment that holds more than your own tokens. |
-| `ANTHROPIC_API_KEY` | Enables business research (web search), visual identity analysis, content generation, translation and free-form AI editing. Without it the app still works end to end from the creator's own input, using a template generator and a rule-based editor. |
+| `GEMINI_API_KEY` | Enables business research (grounded in Google Search), visual identity analysis, content generation, translation and free-form AI editing. Without it the app still works end to end from the creator's own input, using a template generator and a rule-based editor. |
+| `WG_GEMINI_MODEL` | Which Gemini model those features use. Default `gemini-2.5-pro`. |
 | `WG_DATA_DIR` | Where the SQLite database, uploads and published sites live. Defaults to `./data`. |
 | `VERCEL_TOKEN` | Enables the Vercel deploy target. |
 | `NETLIFY_AUTH_TOKEN` | Enables the Netlify deploy target. |
@@ -72,7 +73,7 @@ src/
     db.ts             SQLite schema, lazy connection, additive migrations
     auth.ts           scrypt passwords, httpOnly cookie sessions
     projects.ts       project / locale / version / asset data access
-    research.ts       business research via web search, no-fabrication rules
+    research.ts       business research via Gemini + Google Search grounding
     identity.ts       visual identity analysis + architecture selection
     content.ts        copy generation and Site assembly
     translate.ts      add / remove / backfill a language
@@ -83,6 +84,7 @@ src/
     google/           OAuth, Sheets and Drive clients (read-only scopes)
     menu/             processor, Drive image resolver, source state, sync
     uiux.ts           design-catalogue bridge: query building and mapping
+    gemini.ts         the hosted model: one place for the model name and client
     ollama.ts         local model: detection, background install, JSON client
     ai-edit.ts        AI editing, locale-scoped, with structural guarantees
     deploy.ts         built-in publishing, plus Vercel / Netlify
@@ -146,7 +148,8 @@ architecture and a palette that follow from them.
 
 ### Research, and never inventing anything
 
-`server/research.ts` researches the business with web search. Every field
+`server/research.ts` researches the business with Gemini, grounded in Google
+Search and the pages it finds. Every field
 carries a verification flag, and the model is instructed to leave a field empty
 rather than guess. Prices, hours, reviews, awards and contact details are
 treated as facts a customer could act on and be wrong about.
@@ -217,10 +220,10 @@ capped for menus, and anything unusable falls back to a built-in rule set that
 maps ~15 business categories and ~8 moods. **A bad query is worse than the
 deterministic one.**
 
-### 3. The hosted model — optional, via API key
+### 3. The hosted model — optional, via a Gemini API key
 
-Research, visual identity analysis, copy and translation. When present it sees
-the logo and the research and gets the final say on the palette; the
+Research, visual identity analysis, copy and translation, on Gemini. When
+present it sees the logo and the research and gets the final say on the palette; the
 catalogue's recommendation is passed to it as a strong, explicit prior it must
 justify departing from.
 
@@ -446,7 +449,17 @@ npm run test:design     # 21 checks: the design engine across all its tiers
 npm run test:menu       # 47 checks: the Google Sheets menu pipeline
 npm run test:desktop    # 36 checks: the packaged desktop app
 npm run test:setup      # 40 checks: first launch, second launch, recovery
+npm run test:gemini     # 49 checks: the hosted model, its contracts and failures
 ```
+
+`test:gemini` drives the five hosted-AI features — research, visual identity,
+copy, translation and free-form editing — against a stub Gemini, so the client
+code runs for real without a key. It asserts the contracts the rest of the
+application depends on: the site document still validates, translation changes
+strings and nothing else, an edit reaches the document, requests carry the key
+as a header and never in a URL, research asks for Google Search grounding, and
+a rejected key, a rate limit, a refusal, a missing model or a reply that is not
+JSON each degrade to the same fallback the application always had.
 
 `test:setup` drives the real first-launch bootstrap the way the Windows shell
 does — spawning it, reading its progress, answering its questions — against a

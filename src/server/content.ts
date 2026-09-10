@@ -1,5 +1,4 @@
 import "server-only";
-import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import { architecture } from "@/lib/architectures";
 import { localeInfo, type Locale } from "@/lib/locales";
@@ -8,9 +7,9 @@ import {
   type Section, type SiteKind, type Site,
 } from "@/lib/site";
 import { hasApiKey, type BusinessProfile } from "./research";
+import { describeError, generateText } from "./gemini";
 import type { VisualIdentity } from "./identity";
 
-const MODEL = "claude-opus-5";
 
 /**
  * Content generation and localisation.
@@ -204,12 +203,8 @@ export async function generateContent(args: {
   }
 
   try {
-    const client = new Anthropic();
-    const stream = client.messages.stream({
-      model: MODEL,
-      max_tokens: 32000,
-      thinking: { type: "adaptive" },
-      output_config: { effort: "high" },
+    const { text, refused } = await generateText({
+      maxOutputTokens: 32000,
       system: `You write the copy for one specific small business's website.
 
 ${TRUTH_RULES}
@@ -217,30 +212,19 @@ ${TRUTH_RULES}
 ${UX_RULES}
 
 Output ONLY a JSON object. Every section object must contain every key; use "" or [] for keys that do not apply to its type.`,
-      messages: [
-        {
-          role: "user",
-          content: `${brief({ ...args, plan })}
+      content: `${brief({ ...args, plan })}
 
 Output ONLY this JSON shape:
 {"tagline":"","stickyCtaLabel":"","skipToContent":"","menuLabel":"","chefsChoiceLabel":"","logoAlt":"","sections":[{"type":"","title":"","heading":"","eyebrow":"","headline":"","subheadline":"","body":"","note":"","intro":"","ctaLabel":"","secondaryLabel":"","address":"","bookingLabel":"","tagline":"","highlights":[""],"items":[{"name":"","description":"","price":""}],"categories":[{"name":"","items":[{"name":"","description":"","price":""}]}],"hours":[{"day":"","hours":""}],"testimonials":[{"quote":"","author":""}],"links":[{"label":"","href":""}]}],"seo":{"title":"","description":"","ogTitle":"","ogDescription":"","keywords":[""]}}`,
-        },
-      ],
     });
 
-    const message = await stream.finalMessage();
-    if (message.stop_reason === "refusal") throw new Error("content generation declined");
-
-    const text = message.content
-      .filter((b): b is Anthropic.TextBlock => b.type === "text")
-      .map((b) => b.text)
-      .join("");
+    if (refused) throw new Error("content generation declined");
     const start = text.indexOf("{");
     const end = text.lastIndexOf("}");
     const parsed = ContentSchema.parse(JSON.parse(text.slice(start, end + 1)));
     return { content: parsed, plan };
   } catch (err) {
-    console.error("[content] generation failed, using template:", err);
+    console.error("[content] generation failed, using template:", describeError(err));
     return { content: templateContent(args, plan), plan };
   }
 }

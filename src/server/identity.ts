@@ -1,5 +1,4 @@
 import "server-only";
-import Anthropic from "@anthropic-ai/sdk";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
@@ -9,9 +8,10 @@ import { contrastRatio, repairPalette } from "@/lib/contrast";
 import type { SiteKind, Theme } from "@/lib/site";
 import { UPLOAD_DIR } from "./db";
 import { hasApiKey, type BusinessProfile } from "./research";
+import { describeError, generateText } from "./gemini";
+import type { Part } from "@google/genai";
 import type { SkillDesign } from "./uiux";
 
-const MODEL = "claude-opus-5";
 
 /**
  * Visual identity analysis and design architecture selection
@@ -89,14 +89,11 @@ Questions — ask at most 5, and only when a genuinely consequential design deci
 
 Never invent facts about the business. You are choosing a look, not writing claims.`;
 
-async function logoBlock(logoAssetId: string | null): Promise<Anthropic.ImageBlockParam | null> {
+async function logoPart(logoAssetId: string | null): Promise<Part | null> {
   if (!logoAssetId) return null;
   try {
     const data = await readFile(path.join(UPLOAD_DIR, `${logoAssetId}.webp`));
-    return {
-      type: "image",
-      source: { type: "base64", media_type: "image/webp", data: data.toString("base64") },
-    };
+    return { inlineData: { mimeType: "image/webp", data: data.toString("base64") } };
   } catch {
     return null;
   }
@@ -143,8 +140,7 @@ export async function analyseIdentity(args: {
   }
 
   try {
-    const client = new Anthropic();
-    const logo = await logoBlock(args.logoAssetId);
+    const logo = await logoPart(args.logoAssetId);
 
     const brief = [
       `Business: ${args.businessName}`,
@@ -181,34 +177,23 @@ This is a well-grounded prior. Depart from it only where the actual business giv
       .filter(Boolean)
       .join("\n");
 
-    const content: Anthropic.ContentBlockParam[] = [];
+    const content: Part[] = [];
     if (logo) content.push(logo);
     content.push({
-      type: "text",
       text: `${brief}
 
 Decide the visual identity. Output ONLY a JSON object of this shape and nothing else:
 {"dominantColors":[""],"secondaryColors":[""],"materials":[""],"interiorStyle":"","lighting":"","typographyPersonality":"","brandPersonality":[""],"photographyStyle":"","atmosphere":"","architecture":"","architectureRationale":"","palette":{"primary":"#000000","secondary":"#000000","accent":"#000000","bg":"#ffffff","text":"#000000"},"fonts":{"heading":"","body":""},"sectionPlan":[""],"questions":[{"id":"","question":"","options":[""]}],"confidence":"high"}`,
     });
 
-    const stream = client.messages.stream({
-      model: MODEL,
-      max_tokens: 32000,
-      thinking: { type: "adaptive" },
-      output_config: { effort: "high" },
+    const { text, refused } = await generateText({
       system: SYSTEM,
-      messages: [{ role: "user", content }],
+      maxOutputTokens: 32000,
+      content,
     });
-
-    const message = await stream.finalMessage();
-    if (message.stop_reason === "refusal") {
+    if (refused) {
       return fallbackIdentity(args.kind, args.stylePreset, args.profile);
     }
-
-    const text = message.content
-      .filter((b): b is Anthropic.TextBlock => b.type === "text")
-      .map((b) => b.text)
-      .join("");
     const start = text.indexOf("{");
     const end = text.lastIndexOf("}");
     if (start < 0) return fallbackIdentity(args.kind, args.stylePreset, args.profile);
@@ -218,7 +203,7 @@ Decide the visual identity. Output ONLY a JSON object of this shape and nothing 
 
     return sanitiseIdentity(parsed.data, args.kind, args.stylePreset, args.profile);
   } catch (err) {
-    console.error("[identity] analysis failed, falling back:", err);
+    console.error("[identity] analysis failed, falling back:", describeError(err));
     return fallbackIdentity(args.kind, args.stylePreset, args.profile);
   }
 }

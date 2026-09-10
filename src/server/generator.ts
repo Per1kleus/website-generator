@@ -6,6 +6,7 @@ import { themeFor } from "@/lib/styles";
 import { assembleSite, generateContent } from "./content";
 import { analyseIdentity, themeFromIdentity, type VisualIdentity } from "./identity";
 import { emptyProfile, hasApiKey, researchBusiness, type BusinessProfile } from "./research";
+import { describeError } from "./gemini";
 import { addLocale, ensureSeo } from "./translate";
 import { analyseWithSkill, type SkillDesign } from "./uiux";
 import { ensureFirstLaunch, getState } from "./ollama";
@@ -76,7 +77,7 @@ export async function runGeneration(
       description: input.description,
     });
   } catch (err) {
-    console.error("[generate] research failed:", err);
+    console.error("[generate] research failed:", describeError(err));
     profile = { ...emptyProfile(), name: input.businessName, category: input.businessType };
   }
   // The creator's own input always wins over research for contact details:

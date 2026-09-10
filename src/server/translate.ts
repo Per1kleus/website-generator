@@ -1,10 +1,9 @@
 import "server-only";
-import Anthropic from "@anthropic-ai/sdk";
 import { localeInfo, type Locale } from "@/lib/locales";
 import { allKeys, emptyCatalog, key, t, type Site } from "@/lib/site";
 import { hasApiKey } from "./research";
+import { generateText } from "./gemini";
 
-const MODEL = "claude-opus-5";
 
 /**
  * Localisation (requirements 12-18).
@@ -45,37 +44,22 @@ async function translateStrings(
   to: Locale,
   businessName: string,
 ): Promise<Record<string, string>> {
-  const client = new Anthropic();
   const entries = Object.entries(strings).filter(([, v]) => v && v.trim() !== "");
   const result: Record<string, string> = {};
 
   for (const batch of chunk(entries, 60)) {
     const payload = Object.fromEntries(batch);
-    const stream = client.messages.stream({
-      model: MODEL,
-      max_tokens: 32000,
-      thinking: { type: "adaptive" },
-      output_config: { effort: "high" },
+    const { text, refused } = await generateText({
       system: SYSTEM,
-      messages: [
-        {
-          role: "user",
-          content: `Source language: ${localeInfo(from).english}
+      maxOutputTokens: 32000,
+      content: `Source language: ${localeInfo(from).english}
 Target language: ${localeInfo(to).english} (${localeInfo(to).native})
 Business name (never translate): ${businessName}
 
 ${JSON.stringify(payload, null, 1)}`,
-        },
-      ],
     });
 
-    const message = await stream.finalMessage();
-    if (message.stop_reason === "refusal") continue;
-
-    const text = message.content
-      .filter((b): b is Anthropic.TextBlock => b.type === "text")
-      .map((b) => b.text)
-      .join("");
+    if (refused) continue;
     const start = text.indexOf("{");
     const end = text.lastIndexOf("}");
     if (start < 0) continue;
@@ -111,17 +95,10 @@ async function translateSeo(
 ): Promise<Site["i18n"][string]["seo"]> {
   const source = site.i18n[from]?.seo ?? emptyCatalog().seo;
   try {
-    const client = new Anthropic();
-    const stream = client.messages.stream({
-      model: MODEL,
-      max_tokens: 8000,
-      thinking: { type: "adaptive" },
-      output_config: { effort: "medium" },
+    const { text } = await generateText({
       system: SEO_SYSTEM,
-      messages: [
-        {
-          role: "user",
-          content: `Business name (never translate): ${site.meta.businessName}
+      maxOutputTokens: 8000,
+      content: `Business name (never translate): ${site.meta.businessName}
 Source language: ${localeInfo(from).english}
 Target language: ${localeInfo(to).english} (${localeInfo(to).native})
 
@@ -129,14 +106,7 @@ Source metadata:
 ${JSON.stringify(source, null, 1)}
 
 Output ONLY: {"title":"","description":"","ogTitle":"","ogDescription":"","keywords":[""]}`,
-        },
-      ],
     });
-    const message = await stream.finalMessage();
-    const text = message.content
-      .filter((b): b is Anthropic.TextBlock => b.type === "text")
-      .map((b) => b.text)
-      .join("");
     const start = text.indexOf("{");
     const parsed = JSON.parse(text.slice(start, text.lastIndexOf("}") + 1)) as Record<string, unknown>;
     return {
