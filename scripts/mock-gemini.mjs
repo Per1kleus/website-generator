@@ -24,25 +24,79 @@ const mode = process.argv[3] ?? "ok";
 /** Every request the application made, so a test can assert what was sent. */
 const calls = [];
 
-function research(name) {
+/**
+ * A business shaped like the one that was asked about.
+ *
+ * The stub stands in for the hosted model, so it answers in proportion to the
+ * brief: an accountancy practice comes back with nine services and no
+ * photographs, a taverna with a menu, a detailing studio with a portfolio. A
+ * fixture that returned the same business every time would make every
+ * generated site look alike for reasons that have nothing to do with the app.
+ */
+function shapeOf(text) {
+  // The business's own type line, not the whole prompt: the prompt also
+  // carries the design catalogue's category, and matching on that would make
+  // every business look like the same one.
+  const typed = /^(?:Business|Type):\s*(.+)$/gim;
+  const lines = [];
+  for (const m of text.matchAll(typed)) lines.push(m[1]);
+  if (lines.length) text = lines.join(" ");
+  if (/account|audit|tax|bookkeep/i.test(text)) {
+    return { category: "Accountancy", services: 9, menu: 0, reviews: 4, images: 0, hours: 5, price: "€€",
+      atmosphere: "orderly and practical", audience: "small business owners", positioning: "a dependable accountancy practice" };
+  }
+  if (/law|legal|solicitor|litigation/i.test(text)) {
+    return { category: "Law firm", services: 7, menu: 0, reviews: 3, images: 0, hours: 5, price: "€€€",
+      atmosphere: "formal and discreet", audience: "companies and property owners", positioning: "a commercial law firm" };
+  }
+  if (/gym|fitness|strength|conditioning/i.test(text)) {
+    return { category: "Gym", services: 6, menu: 0, reviews: 6, images: 7, hours: 7, price: "€€",
+      atmosphere: "loud and energetic", audience: "lifters and athletes", positioning: "a strength and conditioning gym" };
+  }
+  if (/detail|ceramic|paint correction/i.test(text)) {
+    return { category: "Car detailing studio", services: 5, menu: 0, reviews: 3, images: 12, hours: 6, price: "€€€€",
+      atmosphere: "precise and photographed", audience: "collectors", positioning: "a detailing studio for collectors" };
+  }
+  if (/hotel|suites|resort|spa/i.test(text)) {
+    return { category: "Boutique hotel", services: 4, menu: 0, reviews: 5, images: 10, hours: 0, price: "€€€€",
+      atmosphere: "calm and private", audience: "couples", positioning: "a boutique hotel of twelve suites" };
+  }
+  if (/taverna|restaurant|cafe|kafeneio|bistro/i.test(text)) {
+    return { category: "Taverna", services: 0, menu: 8, reviews: 4, images: 6, hours: 7, price: "€€",
+      atmosphere: "warm and unhurried", audience: "locals and families", positioning: "a family taverna" };
+  }
+  return { category: "Local business", services: 3, menu: 0, reviews: 2, images: 2, hours: 5, price: "€€",
+    atmosphere: "", audience: "local customers", positioning: "" };
+}
+
+function research(name, shape = shapeOf(name)) {
   return {
     name,
-    category: "Cafe",
-    cuisineOrSpecialty: "Greek coffee and pastries",
+    category: shape.category,
+    cuisineOrSpecialty: shape.menu ? "Greek coffee and pastries" : "",
     location: "Athens",
     address: "12 Example Street, Athens",
     phone: "",
     email: "",
     website: "",
-    openingHours: [{ day: "Monday", hours: "08:00-18:00" }],
-    priceRange: "€€",
+    openingHours: Array.from({ length: shape.hours }, (_, i) => ({
+      day: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][i],
+      hours: "09:00-18:00",
+    })),
+    priceRange: shape.price,
     rating: "4.6",
-    reviewThemes: ["friendly staff", "good coffee"],
-    services: ["dine in", "takeaway"],
-    menuHighlights: [{ name: "Freddo espresso", price: "€3.00" }],
-    atmosphere: "warm, unhurried, neighbourhood",
-    targetAudience: "locals and office workers",
-    positioning: "an everyday neighbourhood cafe",
+    reviewThemes: Array.from({ length: shape.reviews }, (_, i) => `theme ${i + 1}`),
+    services: Array.from({ length: shape.services }, (_, i) => `Service ${i + 1}`),
+    menuHighlights: Array.from({ length: shape.menu }, (_, i) => ({
+      name: `Dish ${i + 1}`,
+      price: `€${(4 + i).toFixed(2)}`,
+    })),
+    // Per business, for the same reason the identity is: a fixture that called
+    // every business "an everyday neighbourhood cafe" would make the layout
+    // engine read them all as one.
+    atmosphere: shape.atmosphere,
+    targetAudience: shape.audience,
+    positioning: shape.positioning,
     verifiedFields: ["name", "category", "location"],
     sources: ["https://example.com/kafeneio"],
     unknowns: ["email"],
@@ -163,11 +217,77 @@ function answerFor(body) {
 
   if (/You research small businesses/i.test(system)) {
     const named = /^Business:\s*(.+)$/m.exec(user)?.[1]?.trim();
-    return JSON.stringify(research(named || "Kafeneio"));
+    return JSON.stringify(research(named || "Kafeneio", shapeOf(user)));
   }
 
   if (/senior brand and web designer/i.test(system)) {
-    return JSON.stringify(identity);
+    // The architecture a real analysis would reach for, and a section plan
+    // that matches what this kind of business actually has.
+    const shape = shapeOf(user);
+    const arch = {
+      "Boutique hotel": "luxury",
+      Taverna: "mediterranean",
+      "Car detailing studio": "image-first",
+      Gym: "modern",
+      "Law firm": "architectural",
+      Accountancy: "classic",
+    }[shape.category] ?? "editorial";
+    const plan = ["hero", "about"];
+    if (shape.services) plan.push("services");
+    if (shape.menu) plan.push("menu");
+    if (shape.images >= 4) plan.push("gallery");
+    if (shape.hours) plan.push("hours");
+    if (shape.reviews >= 3) plan.push("testimonials");
+    plan.push("cta", "contact", "footer");
+    // The identity a real analysis would return for this kind of place. A
+    // fixture that described every business as a warm neighbourhood cafe would
+    // make the layout engine read them all as the same business.
+    const character = {
+      "Boutique hotel": {
+        atmosphere: "calm, private, expensive light",
+        interiorStyle: "pared-back luxury",
+        brandPersonality: ["refined", "quiet", "exclusive"],
+        materials: ["whitewashed stone", "linen", "brass"],
+        typographyPersonality: "elegant high-contrast serif",
+      },
+      Taverna: {
+        atmosphere: "warm, family, unhurried",
+        interiorStyle: "traditional village taverna",
+        brandPersonality: ["warm", "traditional", "generous"],
+        materials: ["wood", "ceramic", "vine"],
+        typographyPersonality: "handmade warmth",
+      },
+      "Car detailing studio": {
+        atmosphere: "precise, showroom, photographed",
+        interiorStyle: "industrial studio",
+        brandPersonality: ["meticulous", "premium", "visual"],
+        materials: ["polished paint", "carbon", "glass"],
+        typographyPersonality: "technical grotesk",
+      },
+      Gym: {
+        atmosphere: "loud, hot, energetic",
+        interiorStyle: "raw training floor",
+        brandPersonality: ["strong", "energetic", "direct"],
+        materials: ["steel", "rubber", "concrete"],
+        typographyPersonality: "heavy condensed",
+      },
+      "Law firm": {
+        atmosphere: "formal, considered, discreet",
+        interiorStyle: "panelled offices",
+        brandPersonality: ["authoritative", "precise", "trusted"],
+        materials: ["oak", "leather", "paper"],
+        typographyPersonality: "classical serif",
+      },
+      Accountancy: {
+        atmosphere: "orderly, practical, trustworthy",
+        interiorStyle: "plain professional office",
+        brandPersonality: ["dependable", "clear", "methodical"],
+        materials: ["paper", "glass", "steel"],
+        typographyPersonality: "plain grotesk",
+      },
+    }[shape.category] ?? {};
+
+    return JSON.stringify({ ...identity, ...character, architecture: arch, sectionPlan: plan });
   }
 
   if (/You write SEO metadata/i.test(system)) {
@@ -207,8 +327,57 @@ function answerFor(body) {
     return JSON.stringify(doc);
   }
 
-  // The remaining caller is copy generation.
-  return JSON.stringify(content);
+  // The remaining caller is copy generation: write the sections that were
+  // asked for, with as many items as the research established.
+  const requested = /SECTIONS TO WRITE, IN THIS ORDER:\s*(.+)/i.exec(user)?.[1] ?? "";
+  const plan = requested
+    .split(",")
+    .map((p) => p.trim())
+    .filter(Boolean);
+  if (!plan.length) return JSON.stringify(content);
+
+  const shape = shapeOf(user);
+  const blank = {
+    type: "", title: "", heading: "", eyebrow: "", headline: "", subheadline: "", body: "",
+    note: "", intro: "", ctaLabel: "", secondaryLabel: "", address: "", bookingLabel: "",
+    tagline: "", highlights: [], items: [], categories: [], hours: [], testimonials: [], links: [],
+  };
+  const name = /^Business:\s*(.+)$/m.exec(user)?.[1]?.trim() || "The Business";
+  const sections = plan.map((type) => {
+    const base = { ...blank, type, title: type };
+    switch (type) {
+      case "hero":
+        return { ...base, eyebrow: "Athens", headline: name, subheadline: `${shape.category} in Athens`, ctaLabel: "Call the studio" };
+      case "about":
+        // Written from what the research established, so a test can check that
+        // the research actually reached the finished page.
+        return {
+          ...base,
+          heading: `About ${name}`,
+          body: `${name} is ${shape.positioning || shape.category.toLowerCase()}, ${shape.atmosphere || "in Athens"}. This paragraph is long enough to read as real prose rather than a placeholder line.\n\nA second paragraph, so the page has something to set.`,
+          highlights: ["Since 1974", "Family run"],
+        };
+      case "services":
+        return { ...base, heading: "What we do", items: Array.from({ length: shape.services }, (_, i) => ({ name: `Service ${i + 1}`, description: "What this service involves, in one sentence.", price: "" })) };
+      case "menu":
+        return { ...base, heading: "Menu", categories: [{ name: "Plates", items: Array.from({ length: shape.menu }, (_, i) => ({ name: `Dish ${i + 1}`, description: "", price: `€${(4 + i).toFixed(2)}` })) }] };
+      case "hours":
+        return { ...base, heading: "Opening hours", hours: Array.from({ length: shape.hours }, (_, i) => ({ day: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][i], hours: "09:00-18:00" })) };
+      case "testimonials":
+        return { ...base, heading: "What people say", testimonials: Array.from({ length: shape.reviews }, (_, i) => ({ quote: "Something a customer said about the work.", author: `Customer ${i + 1}` })) };
+      case "cta":
+        return { ...base, heading: "Come and see us", body: "One line inviting the visitor to get in touch.", ctaLabel: "Book a table" };
+      case "contact":
+        return { ...base, heading: "Find us", address: "12 Example Street, Athens" };
+      default:
+        return { ...base, heading: type };
+    }
+  });
+
+  return JSON.stringify({
+    ...content,
+    sections,
+  });
 }
 
 const server = createServer((req, res) => {

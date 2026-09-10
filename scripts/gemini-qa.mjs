@@ -16,6 +16,7 @@
  *   node scripts/gemini-qa.mjs
  */
 import { spawn } from "node:child_process";
+import { createServer } from "node:net";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -56,30 +57,51 @@ function spawnChild(cmd, args, env) {
   children.push(child);
   return child;
 }
+/**
+ * Stop a child and everything it started.
+ *
+ * SIGTERM first, because a graceful stop is the normal case; then SIGKILL,
+ * because Next drains in-flight work before exiting and a phase that waits on
+ * that holds the port long enough to break the next one.
+ */
 function stop(child) {
   if (!child) return;
-  try {
-    process.kill(-child.pid, "SIGTERM");
-  } catch {
+  const signal = (sig) => {
     try {
-      child.kill("SIGTERM");
+      process.kill(-child.pid, sig);
     } catch {
-      /* already gone */
-    }
-  }
-}
-async function waitForPortFree(port) {
-  return waitFor(
-    async () => {
       try {
-        await fetch(`http://127.0.0.1:${port}/login`);
-        return false;
+        child.kill(sig);
       } catch {
-        return true;
+        /* already gone */
       }
-    },
-    { timeout: 20000, interval: 300 },
-  );
+    }
+  };
+  signal("SIGTERM");
+  setTimeout(() => {
+    if (child.exitCode === null && child.signalCode === null) signal("SIGKILL");
+  }, 1500).unref();
+}
+/**
+ * Wait until the port can actually be bound.
+ *
+ * Asking over HTTP is not enough: a server that has stopped answering may
+ * still hold the socket for a moment, and the next phase's server then fails
+ * to bind while the old one keeps serving its own database — which shows up
+ * much later as a session that "does not exist".
+ */
+function portFree(port) {
+  return new Promise((resolve) => {
+    const probe = createServer();
+    probe.once("error", () => resolve(false));
+    probe.listen(port, "127.0.0.1", () => probe.close(() => resolve(true)));
+  });
+}
+
+async function waitForPortFree(port) {
+  const free = await waitFor(() => portFree(port), { timeout: 30000, interval: 250 });
+  if (!free) throw new Error(`port ${port} never became free`);
+  return free;
 }
 
 let cookie = "";
@@ -115,19 +137,26 @@ async function signUp(label) {
       }),
     });
     if (res.status === 200 && cookie) return;
+    console.log(`    (signup attempt ${attempt + 1}: status ${res.status} ${res.text.slice(0, 120)} cookie=${cookie ? "set" : "none"})`);
     await sleep(500);
   }
   throw new Error(`could not sign in for the ${label} phase`);
 }
 
 async function generate(payload) {
+  if (!cookie) throw new Error("no session cookie before creating a project");
+  await assertSameServer("project creation");
   const created = await api("/api/projects", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
   const id = created.json?.project?.id;
-  if (!id) throw new Error(`could not create a project: ${created.status} ${created.text.slice(0, 120)}`);
+  if (!id) {
+    throw new Error(
+      `could not create a project: ${created.status} ${created.text.slice(0, 120)} (cookie=${cookie.slice(0, 24)}…)`,
+    );
+  }
   await api(`/api/projects/${id}/generate`, { method: "POST" });
   const done = await waitFor(
     async () => {
@@ -162,7 +191,9 @@ async function calls() {
  * Start the app pointed at a stub in a given mode. Each mode needs its own
  * stub process, and the app has to be restarted so its environment changes.
  */
+let bootCount = 0;
 async function boot({ mode = "ok", key = KEY, dataDir }) {
+  const stamp = `phase-${mode}-${key ? "key" : "nokey"}-${++bootCount}`;
   // Both ports must be genuinely free first: a server that fails to bind exits
   // quietly, and the previous phase's server would answer in its place.
   await waitForPortFree(APP_PORT);
@@ -180,6 +211,9 @@ async function boot({ mode = "ok", key = KEY, dataDir }) {
   if (!stubUp) throw new Error("the Gemini stub did not start");
   const app = spawnChild("npx", ["next", "start", "-p", String(APP_PORT)], {
     WG_DATA_DIR: dataDir,
+    // Stamped so this phase can prove it is talking to its own server rather
+    // than to a previous phase's that never let go of the port.
+    WG_VERSION: stamp,
     ...(key ? { GEMINI_API_KEY: key } : { GEMINI_API_KEY: "" }),
     GEMINI_BASE_URL: GEMINI,
     // Ollama is a separate system and is deliberately absent here: this suite
@@ -231,7 +265,24 @@ async function boot({ mode = "ok", key = KEY, dataDir }) {
     { timeout: 20000 },
   );
   if (!settled) throw new Error(`app started and then stopped (mode ${mode})`);
+
+  const health = await (await fetch(`${BASE}/api/health`)).json();
+  if (health.version !== stamp) {
+    throw new Error(
+      `port ${APP_PORT} is answering from another server (expected ${stamp}, got ${health.version})`,
+    );
+  }
+  currentStamp = stamp;
   return { app, stub };
+}
+
+/** The server this phase started, so a swap mid-phase is caught immediately. */
+let currentStamp = "";
+async function assertSameServer(where) {
+  const health = await (await fetch(`${BASE}/api/health`)).json();
+  if (health.version !== currentStamp) {
+    throw new Error(`the server changed under us at ${where}: expected ${currentStamp}, got ${health.version}`);
+  }
 }
 
 async function shutdown({ app, stub }) {
@@ -288,7 +339,8 @@ try {
     Boolean(site?.meta && site?.theme && Array.isArray(site?.sections) && site?.i18n),
   );
   record("researched facts reached the finished site",
-    values.includes("Greek coffee") || values.includes("neighbourhood"),
+    values.includes("family taverna") || values.includes("Taverna"),
+    values.slice(0, 80),
   );
   record("the identity analysis set the theme",
     site?.theme?.colors?.primary === "#6b3f23" || Boolean(site?.theme?.colors?.primary),

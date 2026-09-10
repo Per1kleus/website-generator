@@ -9,6 +9,8 @@ import { emptyProfile, hasApiKey, researchBusiness, type BusinessProfile } from 
 import { describeError } from "./gemini";
 import { addLocale, ensureSeo } from "./translate";
 import { analyseWithSkill, type SkillDesign } from "./uiux";
+import { applyLayoutPlan, planLayout, type LayoutPlan } from "./layout";
+import { critique, type Critique } from "./critic";
 import { ensureFirstLaunch, getState } from "./ollama";
 
 export { hasApiKey };
@@ -49,6 +51,10 @@ export type GenerationArtifacts = {
   usedAi: boolean;
   /** What the ui-ux-pro-max skill recommended, for the creator to see. */
   skill: SkillDesign | null;
+  /** What the content-aware layout engine decided, and why. */
+  layout: LayoutPlan;
+  /** What the design review found, and which corrections were applied. */
+  critique: Critique;
 };
 
 export type StageReporter = (stage: string, message: string) => void;
@@ -171,6 +177,34 @@ export async function runGeneration(
       : null,
   });
 
+  /* 5b. Design systems ---------------------------------------------------
+     The catalogue chose the direction and the model wrote the content; these
+     three decide how the page is actually composed, and they are deterministic:
+     the layout engine reads what the document really contains, the token
+     engine turns that into one coherent visual language, and the heuristics
+     check the result against the patterns that make a page look generated. */
+  report("design", "Composing the layout for this business");
+  const layout = planLayout({
+    site,
+    profile,
+    identity,
+    skill,
+    businessType: input.businessType,
+    description: input.description,
+  });
+  site = applyLayoutPlan(site, layout);
+  for (const note of layout.notes.slice(0, 3)) report("design", note);
+
+  /* 5c. Design review -----------------------------------------------------
+     Deterministic findings first; a single hosted critique only when they
+     show something worth a second opinion. A page that already reads as
+     designed costs nothing here. */
+  const reviewed = await critique(site, layout.signals);
+  site = reviewed.site;
+  if (reviewed.critique.applied.length) {
+    report("design", `Design review: ${reviewed.critique.applied.join(", ")}`);
+  }
+
   /* 6. Localisation ------------------------------------------------------ */
   const extra = input.locales.filter((l) => l !== input.defaultLocale);
   if (extra.length === 0) {
@@ -188,5 +222,5 @@ export async function runGeneration(
   site = ensureSeo(site);
 
   report("build", "Building the website");
-  return { site, profile, identity, usedAi, skill };
+  return { site, profile, identity, usedAi, skill, layout, critique: reviewed.critique };
 }

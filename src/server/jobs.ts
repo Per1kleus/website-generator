@@ -112,7 +112,7 @@ export function startGeneration(projectId: string, input: GenerationInput): Job 
 
 async function run(jobId: string, projectId: string, input: GenerationInput) {
   try {
-    const { site, profile, identity, usedAi, skill } = await runGeneration(input, (stage, message) => {
+    const { site, profile, identity, usedAi, skill, layout, critique } = await runGeneration(input, (stage, message) => {
       reportStage(jobId, stage, message);
     });
 
@@ -130,8 +130,19 @@ async function run(jobId: string, projectId: string, input: GenerationInput) {
       JSON.stringify(site),
       JSON.stringify(profile),
       // The skill's recommendation is stored alongside the identity so the
-      // project screen can show why the design looks the way it does.
-      JSON.stringify({ ...identity, skill }),
+      // project screen can show why the design looks the way it does — now
+      // with the layout decisions and the design review that followed them.
+      JSON.stringify({
+        ...identity,
+        skill,
+        layout: { signals: layout.signals, content: layout.content, notes: layout.notes },
+        critique: {
+          applied: critique.applied,
+          consulted: critique.consulted,
+          notes: critique.notes,
+          findings: critique.findings.map((f) => ({ id: f.id, severity: f.severity, issue: f.issue })),
+        },
+      }),
       site.meta.defaultLocale,
       JSON.stringify(site.meta.locales),
       now,

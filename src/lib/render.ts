@@ -1,7 +1,8 @@
 import { architecture, RHYTHM_SPACING, type DesignArchitecture } from "./architectures";
 import { readableOn } from "./contrast";
 import { localeInfo, type Locale } from "./locales";
-import { fontStack, key, t, type Section, type Site } from "./site";
+import { fontStack, key, t, type Section, type SectionLayout, type Site } from "./site";
+import { tokensForArchitecture } from "./tokens";
 
 /**
  * Renders one locale of a Site document to a standalone HTML page.
@@ -86,31 +87,68 @@ function stackFor(site: Site, role: "heading" | "body"): string {
 
 function styles(site: Site, a: DesignArchitecture, dir: "ltr" | "rtl"): string {
   const c = site.theme.colors;
-  const rhythm = RHYTHM_SPACING[a.rhythm];
-  const radius = a.radius;
 
-  // Motion budget is an architecture decision, and is additionally overridden
-  // to zero by prefers-reduced-motion further down.
-  const dur = a.motion === "none" ? "0ms" : a.motion === "subtle" ? "160ms" : "280ms";
+  /* The design system decides the values; the architecture decides the
+     composition. A document generated before the token engine existed is
+     rendered from its architecture alone, which reproduces exactly what it
+     looked like then. */
+  const tk = site.theme.tokens ?? tokensForArchitecture(site.theme.architecture, site.meta.kind);
+
+  const radius = tk.shape.card;
+  const imageRadius = tk.shape.image;
+
+  // Motion budget, additionally overridden to zero by prefers-reduced-motion
+  // further down.
+  const dur = tk.motion === "none" ? "0ms" : tk.motion === "subtle" ? "160ms" : "280ms";
 
   const imageShape = {
     sharp: `border-radius:0`,
-    soft: `border-radius:${radius}px`,
-    framed: `border-radius:0;border:1px solid var(--line);padding:6px;background:var(--bg)`,
-    arch: `border-radius:${Math.max(radius, 120)}px ${Math.max(radius, 120)}px ${radius}px ${radius}px`,
+    soft: `border-radius:${imageRadius}px`,
+    framed: `border-radius:0;border:${tk.shape.border}px solid var(--line);padding:6px;background:var(--bg)`,
+    arch: `border-radius:${Math.max(imageRadius, 120)}px ${Math.max(imageRadius, 120)}px ${imageRadius}px ${imageRadius}px`,
     circle: `border-radius:50%`,
-    duotone: `border-radius:${radius}px;filter:saturate(.55) contrast(1.05)`,
-  }[a.images];
+    duotone: `border-radius:${imageRadius}px;filter:saturate(.55) contrast(1.05)`,
+  }[tk.image.treatment];
 
   const btnRadius =
-    a.buttonShape === "pill" ? "999px" : a.buttonShape === "rounded" ? `${Math.max(radius, 8)}px` : "0";
+    tk.shape.buttonShape === "pill" ? "999px" : tk.shape.buttonShape === "square" ? "0" : `${tk.shape.button}px`;
 
   const btnFill =
-    a.buttonFill === "solid"
-      ? `background:var(--primary);color:var(--on-primary);border:${a.ruleWeight}px solid var(--primary)`
-      : a.buttonFill === "outline"
-        ? `background:transparent;color:var(--primary);border:${a.ruleWeight}px solid var(--primary)`
-        : `background:transparent;color:var(--primary);border:0;border-bottom:${a.ruleWeight + 1}px solid var(--primary);padding-inline:0;border-radius:0`;
+    tk.shape.buttonFill === "solid"
+      ? `background:var(--primary);color:var(--on-primary);border:${tk.shape.border}px solid var(--primary)`
+      : tk.shape.buttonFill === "outline"
+        ? `background:transparent;color:var(--primary);border:${tk.shape.border}px solid var(--primary)`
+        : `background:transparent;color:var(--primary);border:0;border-bottom:${tk.shape.border + 1}px solid var(--primary);padding-inline:0;border-radius:0`;
+
+  /* Card surface. "none" is a real answer: for a formal, quiet business the
+     right container for a list of services is no container at all. */
+  const cardSurface = {
+    none: `background:transparent;border:0;padding:0`,
+    border: `background:transparent;border:${tk.shape.border}px solid var(--line);padding:1.25rem`,
+    tint: `background:var(--card);border:${tk.shape.border}px solid var(--line);padding:1.25rem`,
+    raised: `background:var(--card);border:0;padding:1.375rem`,
+  }[tk.surface.card];
+
+  const shadowValue = {
+    none: "none",
+    hairline: "0 1px 0 color-mix(in srgb,var(--text) 10%,transparent)",
+    soft: "0 2px 10px color-mix(in srgb,var(--text) 8%,transparent)",
+    lifted: "0 10px 30px color-mix(in srgb,var(--text) 14%,transparent)",
+  }[tk.shape.shadow];
+
+  /* The hero's composition comes from the layout engine when it has decided
+     one, and from the architecture otherwise. */
+  const heroSection = site.sections.find((s) => s.type === "hero");
+  const heroStyle: DesignArchitecture["hero"] =
+    heroSection?.layout === "image-led"
+      ? "split"
+      : heroSection?.layout === "typographic"
+        ? "typographic"
+        : heroSection?.layout === "poster"
+          ? "poster"
+          : heroSection?.layout === "editorial-hero"
+            ? "editorial"
+            : a.hero;
 
   return `
 :root{
@@ -124,13 +162,14 @@ function styles(site: Site, a: DesignArchitecture, dir: "ltr" | "rtl"): string {
   --on-primary:${esc(readableOn(c.primary))};
   --on-accent:${esc(readableOn(c.accent))};
   --muted:color-mix(in srgb, ${esc(c.text)} 62%, ${esc(c.bg)});
-  --line:color-mix(in srgb, ${esc(c.text)} ${a.ruleWeight > 1 ? 40 : 16}%, ${esc(c.bg)});
+  --line:color-mix(in srgb, ${esc(c.text)} ${tk.shape.border > 1 ? 40 : 16}%, ${esc(c.bg)});
   --card:color-mix(in srgb, ${esc(c.bg)} 94%, ${esc(c.text)});
   --radius:${radius}px;
-  --block:${rhythm.block};
-  --gap:${rhythm.gap};
-  --measure:${a.measure}ch;
-  --rule:${a.ruleWeight}px;
+  --block:clamp(${(tk.space.section * 0.55).toFixed(2)}rem,${(tk.space.section * 0.35).toFixed(2)}rem + ${(tk.space.section * 0.9).toFixed(2)}vw,${tk.space.section.toFixed(2)}rem);
+  --gap:${tk.space.gap.toFixed(2)}rem;
+  --measure:${tk.type.measure}ch;
+  --rule:${tk.shape.border}px;
+  --shadow:${shadowValue};
   --dur:${dur};
   --safe-t:env(safe-area-inset-top,0px);
   --safe-b:env(safe-area-inset-bottom,0px);
@@ -143,23 +182,26 @@ body{
   margin:0;background:var(--bg);color:var(--text);
   font-family:${stackFor(site, "body")};
   font-size:clamp(1rem,.96rem + .2vw,1.125rem);
-  line-height:1.6;overflow-x:hidden;
+  font-weight:${tk.type.bodyWeight};
+  letter-spacing:${tk.type.bodyTracking};
+  line-height:${tk.type.bodyLeading};overflow-x:hidden;
 }
 h1,h2,h3{
   font-family:${stackFor(site, "heading")};
-  line-height:1.1;margin:0 0 .5em;text-wrap:balance;
-  letter-spacing:${a.headingTracking};
-  ${a.headingCase === "upper" ? "text-transform:uppercase;" : ""}
+  font-weight:${tk.type.headingWeight};
+  line-height:${tk.type.headingLeading};margin:0 0 .5em;text-wrap:balance;
+  letter-spacing:${tk.type.headingTracking};
+  ${tk.type.headingCase === "upper" ? "text-transform:uppercase;" : ""}
 }
-h1{font-size:clamp(${(1.85 * a.typeScale).toFixed(2)}rem,${(1.2 * a.typeScale).toFixed(2)}rem + ${(2.8 * a.typeScale).toFixed(2)}vw,${(3.4 * a.typeScale).toFixed(2)}rem)}
-h2{font-size:clamp(${(1.4 * a.typeScale).toFixed(2)}rem,${(1.1 * a.typeScale).toFixed(2)}rem + ${(1.5 * a.typeScale).toFixed(2)}vw,${(2.2 * a.typeScale).toFixed(2)}rem)}
+h1{font-size:clamp(${(1.85 * tk.type.scale).toFixed(2)}rem,${(1.2 * tk.type.scale).toFixed(2)}rem + ${(2.8 * tk.type.scale * tk.type.ratio / 1.25).toFixed(2)}vw,${(3.4 * tk.type.scale * tk.type.ratio / 1.25).toFixed(2)}rem)}
+h2{font-size:clamp(${(1.4 * tk.type.scale).toFixed(2)}rem,${(1.1 * tk.type.scale).toFixed(2)}rem + ${(1.5 * tk.type.scale).toFixed(2)}vw,${(2.2 * tk.type.scale).toFixed(2)}rem)}
 h3{font-size:clamp(1.05rem,1rem + .55vw,1.3rem);letter-spacing:0;text-transform:none}
 p{margin:0 0 1em;text-wrap:pretty;max-width:var(--measure)}
 img{max-width:100%;height:auto;display:block}
 a{color:var(--primary)}
 :focus-visible{outline:2px solid var(--primary);outline-offset:3px}
 
-.wrap{width:100%;max-width:72rem;margin-inline:auto;
+.wrap{width:100%;max-width:${tk.space.container}rem;margin-inline:auto;
   padding-inline:max(1.25rem,var(--safe-l),var(--safe-r));}
 section{padding-block:var(--block)}
 .eyebrow{
@@ -169,7 +211,7 @@ section{padding-block:var(--block)}
 .muted{color:var(--muted)}
 .lead{font-size:1.0625em}
 
-${a.headingOrnament === "rule"
+${a.headingOrnament === "rule" || tk.surface.divider === "rule"
   ? `section > .wrap > h2::before{content:"";display:block;width:3rem;height:var(--rule);background:var(--primary);margin-bottom:1rem}`
   : a.headingOrnament === "number"
     ? `main{counter-reset:sec}
@@ -185,7 +227,7 @@ ${a.headingOrnament === "rule"
   min-height:3rem;padding:.75rem 1.5rem;border-radius:${btnRadius};
   font-weight:650;text-decoration:none;${btnFill};
   transition:transform var(--dur) ease,filter var(--dur) ease;
-  ${a.headingCase === "upper" ? "text-transform:uppercase;letter-spacing:.1em;font-size:.875rem;" : ""}
+  ${tk.type.headingCase === "upper" ? "text-transform:uppercase;letter-spacing:.1em;font-size:.875rem;" : ""}
 }
 .btn:active{transform:scale(.98)}
 .btn.ghost{background:transparent;color:var(--primary);border:var(--rule) solid var(--line)}
@@ -282,8 +324,8 @@ ${a.nav === "sidebarish"
 @media (min-width:40rem){.grid.two{grid-template-columns:repeat(2,1fr)}}
 @media (min-width:64rem){.grid.three{grid-template-columns:repeat(3,1fr)}}
 .card{
-  background:var(--card);border:var(--rule) solid var(--line);
-  border-radius:${radius}px;padding:1.25rem;
+  ${cardSurface};border-radius:${radius}px;
+  ${tk.shape.shadow === "none" ? "" : "box-shadow:var(--shadow);"}
 }
 
 /* ------------------------------------------------------------------ hero */
@@ -292,13 +334,13 @@ ${a.nav === "sidebarish"
 .media img{width:100%;height:100%;object-fit:cover}
 .hero-media{margin-top:1.5rem;aspect-ratio:4/3}
 @media (min-width:52rem){.hero-media{aspect-ratio:16/9}}
-${a.hero === "split"
+${heroStyle === "split"
   ? `@media (min-width:64rem){
        .hero .wrap{display:grid;grid-template-columns:1.05fr .95fr;gap:3rem;align-items:center}
        .hero-media{margin-top:0;aspect-ratio:4/5}
      }`
   : ""}
-${a.hero === "stacked"
+${heroStyle === "stacked"
   ? `.hero{position:relative;padding:0}
      .hero .hero-media{margin:0;aspect-ratio:3/4;border-radius:0}
      @media (min-width:52rem){.hero .hero-media{aspect-ratio:21/9}}
@@ -308,11 +350,11 @@ ${a.hero === "stacked"
      }
      @media (min-width:52rem){.hero .hero-copy{margin-top:-18%}}`
   : ""}
-${a.hero === "typographic"
-  ? `.hero h1{font-size:clamp(${(2.2 * a.typeScale).toFixed(2)}rem,${(1.1 * a.typeScale).toFixed(2)}rem + ${(6 * a.typeScale).toFixed(2)}vw,${(5.5 * a.typeScale).toFixed(2)}rem)}
+${heroStyle === "typographic"
+  ? `.hero h1{font-size:clamp(${(2.2 * tk.type.scale).toFixed(2)}rem,${(1.1 * tk.type.scale).toFixed(2)}rem + ${(6 * tk.type.scale).toFixed(2)}vw,${(5.5 * tk.type.scale).toFixed(2)}rem)}
      .hero-media{aspect-ratio:16/9;margin-top:2.5rem}`
   : ""}
-${a.hero === "editorial"
+${heroStyle === "editorial"
   ? `.hero .wrap{border-top:calc(var(--rule) * 3) solid var(--text);padding-top:2rem}
      .hero h1{max-width:14ch}
      @media (min-width:64rem){
@@ -320,7 +362,7 @@ ${a.hero === "editorial"
        .hero-media{margin-top:0;aspect-ratio:1}
      }`
   : ""}
-${a.hero === "poster"
+${heroStyle === "poster"
   ? `.hero{text-align:center}
      .hero .wrap>div{margin-inline:auto}
      .hero p{margin-inline:auto}
@@ -328,12 +370,96 @@ ${a.hero === "poster"
      .hero-media{aspect-ratio:3/2;max-width:56rem;margin-inline:auto}`
   : ""}
 
+/* ------------------------------------------------- section compositions */
+/* One set of items can be a card grid, a ruled list, an editorial column or
+   a numbered index. Which one a section gets is decided per business in
+   server/layout.ts — that decision is what stops every generated site
+   sharing a silhouette. */
+
+.lay-list{display:grid;gap:0}
+.lay-list > *{
+  padding-block:calc(var(--gap) * 1.1);
+  border-top:var(--rule) solid var(--line);
+}
+.lay-list > *:last-child{border-bottom:var(--rule) solid var(--line)}
+.lay-list h3{margin:0 0 .35em}
+.lay-list p{margin:0}
+@media (min-width:52rem){
+  .lay-list > *{display:grid;grid-template-columns:minmax(12rem,18rem) 1fr;gap:2rem;align-items:baseline}
+}
+
+.lay-editorial{display:grid;gap:calc(var(--gap) * 1.6)}
+.lay-editorial > *{max-width:var(--measure)}
+.lay-editorial h3{margin:0 0 .4em}
+.lay-editorial p{margin:0}
+@media (min-width:64rem){
+  .lay-editorial{grid-template-columns:repeat(2,minmax(0,1fr));column-gap:4rem}
+}
+
+.lay-index{counter-reset:idx;display:grid;gap:0}
+.lay-index > *{
+  position:relative;padding-block:calc(var(--gap) * 1.15);padding-inline-start:3.25rem;
+  border-top:var(--rule) solid var(--line);counter-increment:idx;
+}
+.lay-index > *:last-child{border-bottom:var(--rule) solid var(--line)}
+.lay-index > *::before{
+  content:counter(idx,decimal-leading-zero);position:absolute;inset-inline-start:0;top:calc(var(--gap) * 1.15);
+  font-size:.75rem;letter-spacing:.18em;color:var(--primary);font-weight:700;
+}
+.lay-index h3{margin:0 0 .3em}
+.lay-index p{margin:0}
+
+.lay-split{display:grid;gap:var(--gap)}
+@media (min-width:64rem){
+  .lay-split{grid-template-columns:1fr 1fr;gap:3rem;align-items:start}
+}
+
+.lay-statement{max-width:34ch}
+.lay-statement p{font-size:clamp(1.15rem,1rem + .9vw,1.6rem);line-height:1.35;max-width:none}
+.lay-statement blockquote{margin:0;font-size:clamp(1.15rem,1rem + .9vw,1.6rem);line-height:1.35}
+
+.lay-band{
+  background:color-mix(in srgb,var(--primary) 8%,var(--bg));
+  border-block:var(--rule) solid color-mix(in srgb,var(--primary) 25%,transparent);
+  padding-block:calc(var(--gap) * 1.5);padding-inline:calc(var(--gap) * 1.2);
+  border-radius:${radius}px;
+}
+.lay-band blockquote{margin:0;max-width:var(--measure)}
+
+.lay-inline{display:grid;gap:calc(var(--gap) * 1.2)}
+.lay-inline blockquote{margin:0;max-width:var(--measure);padding-inline-start:1rem;border-inline-start:calc(var(--rule) * 3) solid var(--primary)}
+
+/* Alternating background, when the page is long enough to need chapters. */
+${tk.surface.banding
+  ? `main > section:nth-of-type(even):not(.hero):not(.cta-band){background:color-mix(in srgb,var(--text) 3%,var(--bg))}`
+  : ""}
+
 /* --------------------------------------------------------------- gallery */
 .thumbs{display:grid;grid-template-columns:repeat(2,1fr);gap:.5rem}
 @media (min-width:52rem){.thumbs{grid-template-columns:repeat(3,1fr);gap:.75rem}}
-.thumbs figure{margin:0;aspect-ratio:${a.images === "circle" ? "1" : "4/5"};overflow:hidden;background:var(--card);${imageShape}}
+.thumbs figure{margin:0;aspect-ratio:${tk.image.treatment === "circle" ? "1" : tk.image.ratio === "wide" ? "16/10" : tk.image.ratio === "landscape" ? "4/3" : tk.image.ratio === "square" ? "1" : "4/5"};overflow:hidden;background:var(--card);${imageShape}}
 .thumbs img{width:100%;height:100%;object-fit:cover;transition:transform var(--dur) ease}
-${a.motion === "expressive" ? `.thumbs figure:hover img{transform:scale(1.04)}` : ""}
+${tk.motion === "expressive" ? `.thumbs figure:hover img{transform:scale(1.04)}` : ""}
+
+.thumbs.mosaic{grid-template-columns:repeat(2,1fr)}
+.thumbs.mosaic figure:first-child{grid-column:1 / -1;aspect-ratio:16/9}
+@media (min-width:52rem){
+  .thumbs.mosaic{grid-template-columns:repeat(3,1fr)}
+  .thumbs.mosaic figure:first-child{grid-column:span 2;grid-row:span 2;aspect-ratio:auto}
+}
+.thumbs.strip{grid-template-columns:1fr}
+@media (min-width:40rem){.thumbs.strip{grid-template-columns:repeat(auto-fit,minmax(14rem,1fr))}}
+
+.price-line{font-weight:700;margin:.35rem 0 0;color:var(--text)}
+
+/* A quieter invitation: the same content without the coloured band. */
+.cta-inline .wrap{
+  border-top:calc(var(--rule) * 2) solid var(--line);
+  padding-top:calc(var(--gap) * 1.4);
+  max-width:${tk.space.container}rem;
+}
+.cta-inline h2{max-width:20ch}
+.cta-inline p{max-width:var(--measure)}
 
 /* ------------------------------------------------------------------ menu */
 .menu-cat{margin-bottom:2rem}
@@ -457,25 +583,94 @@ ${media}
     case "about": {
       const img = imageUrl(s.imageId, opts);
       const body = str("body").split(/\n{2,}/).filter(Boolean);
+      const layout = s.layout ?? "editorial";
+      const prose = body.map((p) => `<p>${esc(p)}</p>`).join("");
+      const media = img
+        ? `<div class="media hero-media"><img src="${esc(img)}" alt="" loading="lazy" decoding="async" width="1200" height="900"></div>`
+        : "";
+
+      // Highlights are short facts, not a product grid. Boxing three of them
+      // is the most common way a page announces that nobody designed it, so
+      // they are only carded where cards are the section's own language.
+      const highlights = s.highlights.length
+        ? layout === "split" || layout === "editorial"
+          ? `<ul class="lay-list" style="list-style:none;padding:0;margin-top:1.5rem">${s.highlights
+              .map((h) => `<li>${esc(row(h.id, "text"))}</li>`)
+              .join("")}</ul>`
+          : `<ul class="grid two" style="list-style:none;padding:0;margin-top:1.5rem">${s.highlights
+              .map((h) => `<li class="card">${esc(row(h.id, "text"))}</li>`)
+              .join("")}</ul>`
+        : "";
+
+      if (layout === "split" && media) {
+        return `<section id="${id}" aria-labelledby="${id}-h"><div class="wrap">
+<div class="lay-split">
+<div><h2 id="${id}-h">${esc(str("heading"))}</h2>${prose}${highlights}</div>
+${media}
+</div>
+</div></section>`;
+      }
+
+      if (layout === "statement") {
+        return `<section id="${id}" aria-labelledby="${id}-h"><div class="wrap">
+<h2 id="${id}-h">${esc(str("heading"))}</h2>
+<div class="lay-statement">${prose}</div>
+${media}${highlights}
+</div></section>`;
+      }
+
       return `<section id="${id}" aria-labelledby="${id}-h"><div class="wrap">
 <h2 id="${id}-h">${esc(str("heading"))}</h2>
-${body.map((p) => `<p>${esc(p)}</p>`).join("")}
-${img ? `<div class="media hero-media"><img src="${esc(img)}" alt="" loading="lazy" decoding="async" width="1200" height="900"></div>` : ""}
-${s.highlights.length ? `<ul class="grid two" style="list-style:none;padding:0;margin-top:1.5rem">${
-  s.highlights.map((h) => `<li class="card">${esc(row(h.id, "text"))}</li>`).join("")
-}</ul>` : ""}
+${prose}
+${media}
+${highlights}
 </div></section>`;
     }
 
-    case "services":
+    case "services": {
+      // Same items, four different compositions. Which one this business gets
+      // was decided from what it actually has: three comparable services scan
+      // well as cards, nine read better as an index, and two are a statement
+      // rather than a grid of two.
+      const layout = s.layout ?? "cards";
+      const price = (it: { price: string }) =>
+        it.price ? `<p class="price-line">${esc(it.price)}</p>` : "";
+      const item = (it: (typeof s.items)[number], tag: string) =>
+        `<${tag}><h3>${esc(row(it.id, "name"))}</h3><div><p class="muted">${esc(
+          row(it.id, "description"),
+        )}</p>${price(it)}</div></${tag}>`;
+
+      const bodyHtml =
+        layout === "cards"
+          ? `<div class="grid ${s.items.length % 3 === 0 && s.items.length > 3 ? "three" : "two"}">${s.items
+              .map(
+                (it) =>
+                  `<article class="card"><h3>${esc(row(it.id, "name"))}</h3><p class="muted">${esc(
+                    row(it.id, "description"),
+                  )}</p>${price(it)}</article>`,
+              )
+              .join("")}</div>`
+          : layout === "index"
+            ? `<div class="lay-index">${s.items.map((it) => item(it, "article")).join("")}</div>`
+            : layout === "editorial"
+              ? `<div class="lay-editorial">${s.items.map((it) => item(it, "article")).join("")}</div>`
+              : layout === "statement"
+                ? `<div class="lay-statement">${s.items
+                    .map(
+                      (it) =>
+                        `<h3>${esc(row(it.id, "name"))}</h3><p>${esc(row(it.id, "description"))}</p>${price(it)}`,
+                    )
+                    .join("")}</div>`
+                : layout === "split"
+                  ? `<div class="lay-split">${s.items.map((it) => item(it, "article")).join("")}</div>`
+                  : `<div class="lay-list">${s.items.map((it) => item(it, "article")).join("")}</div>`;
+
       return `<section id="${id}" aria-labelledby="${id}-h"><div class="wrap">
 <h2 id="${id}-h">${esc(str("heading"))}</h2>
 ${str("intro") ? `<p class="muted lead">${esc(str("intro"))}</p>` : ""}
-<div class="grid two">${s.items.map((it) => `<article class="card">
-<h3>${esc(row(it.id, "name"))}</h3><p class="muted">${esc(row(it.id, "description"))}</p>
-${it.price ? `<p style="font-weight:700;margin:0;color:var(--text)">${esc(it.price)}</p>` : ""}
-</article>`).join("")}</div>
+${bodyHtml}
 </div></section>`;
+    }
 
     case "menu":
       return `<section id="${id}" aria-labelledby="${id}-h"><div class="wrap">
@@ -510,11 +705,19 @@ ${desc ? `<p class="desc">${esc(desc)}</p>` : ""}
         .map((i) => ({ id: i, url: imageUrl(i, opts) }))
         .filter((x): x is { id: string; url: string } => Boolean(x.url));
       if (!imgs.length) return "";
+      const layout = s.layout ?? "grid";
+      const figures = imgs
+        .map(
+          (im) =>
+            `<figure><img src="${esc(im.url)}" alt="${esc(row(im.id, "alt"))}" loading="lazy" decoding="async" width="800" height="1000"></figure>`,
+        )
+        .join("");
+      // A mosaic gives the first image real weight; a strip suits two or three
+      // pictures that would look stranded in a grid.
+      const cls = layout === "mosaic" ? "thumbs mosaic" : layout === "strip" ? "thumbs strip" : "thumbs";
       return `<section id="${id}" aria-labelledby="${id}-h"><div class="wrap">
 <h2 id="${id}-h">${esc(str("heading"))}</h2>
-<div class="thumbs">${imgs.map((im) =>
-  `<figure><img src="${esc(im.url)}" alt="${esc(row(im.id, "alt"))}" loading="lazy" decoding="async" width="800" height="1000"></figure>`,
-).join("")}</div>
+<div class="${cls}">${figures}</div>
 </div></section>`;
     }
 
@@ -525,20 +728,43 @@ ${desc ? `<p class="desc">${esc(desc)}</p>` : ""}
 ${str("note") ? `<p class="muted" style="margin-top:1rem">${esc(str("note"))}</p>` : ""}
 </div></section>`;
 
-    case "testimonials":
-      return `<section id="${id}" aria-labelledby="${id}-h"><div class="wrap">
-<h2 id="${id}-h">${esc(str("heading"))}</h2>
-<div class="grid two">${s.items.map((it) => `<figure class="card" style="margin:0">
+    case "testimonials": {
+      const layout = s.layout ?? "cards";
+      const quote = (it: (typeof s.items)[number], cls = "") =>
+        `<figure class="${cls}" style="margin:0">
 <blockquote>${esc(row(it.id, "quote"))}</blockquote>
 <figcaption class="muted" style="margin-top:.75rem">— ${esc(row(it.id, "author"))}</figcaption>
-</figure>`).join("")}</div>
-</div></section>`;
+</figure>`;
 
-    case "cta":
-      return `<section class="cta-band" id="${id}" aria-labelledby="${id}-h"><div class="wrap">
+      // One review is a quote, not a grid of one — and a formal business reads
+      // better with its reviews set as a ruled list than as floating cards.
+      const bodyHtml =
+        layout === "cards"
+          ? `<div class="grid two">${s.items.map((it) => quote(it, "card")).join("")}</div>`
+          : layout === "statement"
+            ? `<div class="lay-statement">${s.items.slice(0, 1).map((it) => quote(it)).join("")}</div>`
+            : layout === "band"
+              ? `<div class="lay-band">${s.items.map((it) => quote(it)).join("")}</div>`
+              : layout === "list"
+                ? `<div class="lay-list">${s.items.map((it) => quote(it)).join("")}</div>`
+                : `<div class="lay-inline">${s.items.map((it) => quote(it)).join("")}</div>`;
+
+      return `<section id="${id}" aria-labelledby="${id}-h"><div class="wrap">
+<h2 id="${id}-h">${esc(str("heading"))}</h2>
+${bodyHtml}
+</div></section>`;
+    }
+
+    case "cta": {
+      // The full-width coloured band is one option, not the only one. A quiet
+      // business gets the same invitation set inline, which is what a designer
+      // would do rather than shouting once near the footer.
+      const inline = s.layout === "inline";
+      return `<section class="${inline ? "cta-inline" : "cta-band"}" id="${id}" aria-labelledby="${id}-h"><div class="wrap">
 <h2 id="${id}-h">${esc(str("heading"))}</h2><p>${esc(str("body"))}</p>
 ${str("ctaLabel") ? `<div class="btns"><a class="btn" href="${safeHref(s.ctaHref)}">${esc(str("ctaLabel"))}</a></div>` : ""}
 </div></section>`;
+    }
 
     case "contact":
       return `<section id="${id}" aria-labelledby="${id}-h"><div class="wrap">

@@ -32,6 +32,102 @@ export const SITE_KINDS: { id: SiteKind; label: string; blurb: string; emoji: st
 
 export type LayoutDensity = "minimal" | "balanced" | "dense";
 
+/**
+ * The design system for one website.
+ *
+ * A palette swap is not a design. These tokens are the whole visual
+ * language — type, rhythm, shape, weight, motion — derived deterministically
+ * in lib/tokens.ts from the chosen architecture, the ui-ux-pro-max direction,
+ * the business's own identity and what content it actually has.
+ *
+ * Optional on the theme: a document written before this existed renders from
+ * its architecture exactly as it did, and gains tokens the next time it is
+ * generated.
+ */
+export type DesignTokens = {
+  type: {
+    /** Multiplier on the fluid heading scale. */
+    scale: number;
+    /** Ratio between steps — a tight ratio reads calm, a wide one dramatic. */
+    ratio: number;
+    headingWeight: number;
+    bodyWeight: number;
+    headingTracking: string;
+    bodyTracking: string;
+    headingLeading: number;
+    bodyLeading: number;
+    headingCase: "none" | "upper";
+    /** Body measure in characters. */
+    measure: number;
+  };
+  space: {
+    /** Base spacing step in rem; everything else is a multiple. */
+    step: number;
+    /** Vertical padding of a section, as a multiple of the step. */
+    section: number;
+    /** Gap inside a group, as a multiple of the step. */
+    gap: number;
+    /** Content container width in rem. */
+    container: number;
+  };
+  shape: {
+    /** Radii by role rather than one global number: reserving the round
+        treatment for a few components is what stops a page reading as a
+        sheet of pills. */
+    card: number;
+    button: number;
+    image: number;
+    input: number;
+    border: number;
+    /** Shadow language. "none" is a real choice. */
+    shadow: "none" | "hairline" | "soft" | "lifted";
+    buttonShape: "pill" | "rounded" | "square";
+    buttonFill: "solid" | "outline" | "underline";
+  };
+  surface: {
+    /** How a card is drawn — or whether cards are used at all. */
+    card: "none" | "border" | "tint" | "raised";
+    /** Section dividers. */
+    divider: "none" | "rule" | "space";
+    /** Whether alternating sections change background. */
+    banding: boolean;
+  };
+  image: {
+    treatment: "sharp" | "soft" | "arch" | "circle" | "duotone" | "framed";
+    /** Default aspect for editorial images. */
+    ratio: "square" | "portrait" | "landscape" | "wide";
+  };
+  motion: "none" | "subtle" | "expressive";
+  density: LayoutDensity;
+};
+
+/**
+ * How one section is composed.
+ *
+ * The same content can be a card grid, a list, an editorial column or a
+ * numbered index — and choosing per business is what stops every generated
+ * site sharing one silhouette. Chosen deterministically in server/layout.ts.
+ */
+export type SectionLayout =
+  /* services / testimonials / about highlights */
+  | "cards"       // the familiar grid — still right for some businesses
+  | "list"        // rows with rules between them
+  | "editorial"   // full-measure prose blocks, no boxes
+  | "index"       // numbered index, typographic
+  | "split"       // copy beside media
+  | "statement"   // one large idea, no supporting furniture
+  | "band"        // full-width tinted band
+  | "inline"      // sits in the flow, no section chrome
+  /* gallery */
+  | "grid"
+  | "mosaic"
+  | "strip"
+  /* hero */
+  | "image-led"
+  | "typographic"
+  | "poster"
+  | "editorial-hero";
+
 export type Theme = {
   colors: { primary: string; secondary: string; accent: string; bg: string; text: string };
   /** Local stacks, always present — they are the fallback for `fontFamilies`. */
@@ -46,6 +142,8 @@ export type Theme = {
   radius: number;
   /** Chosen design architecture — see lib/architectures.ts. */
   architecture: string;
+  /** The derived design system. Absent on documents generated before it existed. */
+  tokens?: DesignTokens;
 };
 
 export type SectionType =
@@ -71,7 +169,14 @@ export type MenuCategoryRow = ListRow & { items: MenuItemRow[]; sourceKey?: stri
 export type HoursRow = ListRow & { hours: string };
 export type LinkRow = ListRow & { href: string };
 
-export type Section =
+/**
+ * A section, plus how it is composed.
+ *
+ * `layout` is intersected across the union so every section type carries it
+ * while `type` still narrows the rest. Absent means "the renderer's default
+ * for this type", which is what existing documents get.
+ */
+export type Section = ({ layout?: SectionLayout }) & (
   | { id: string; type: "hero"; visible: boolean;
       ctaHref: string; secondaryHref: string; imageId: string }
   | { id: string; type: "about"; visible: boolean;
@@ -84,7 +189,8 @@ export type Section =
   | { id: string; type: "cta"; visible: boolean; ctaHref: string }
   | { id: string; type: "contact"; visible: boolean;
       phone: string; email: string; mapsUrl: string; bookingUrl: string }
-  | { id: string; type: "footer"; visible: boolean; links: LinkRow[] };
+  | { id: string; type: "footer"; visible: boolean; links: LinkRow[] }
+);
 
 /* -------------------------------------------------------------------------
    Localised content
@@ -359,6 +465,7 @@ export const GENERATION_STEPS: { key: string; label: string }[] = [
   { key: "analysis", label: "Identity analysed" },
   { key: "architecture", label: "Design architecture chosen" },
   { key: "content", label: "Content written" },
+  { key: "design", label: "Layout and design system composed" },
   { key: "localize", label: "Languages prepared" },
   { key: "build", label: "Website built" },
   { key: "seo", label: "SEO generated" },

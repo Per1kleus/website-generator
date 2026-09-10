@@ -234,6 +234,44 @@ present it sees the logo and the research and gets the final say on the palette;
 catalogue's recommendation is passed to it as a strong, explicit prior it must
 justify departing from.
 
+### 4. The design systems — always on
+
+The catalogue chooses a direction; these four decide how the page is actually
+built. Three of them are deterministic — no model, no network, microseconds —
+and one asks for a second opinion only when the other three are unhappy.
+
+**The content-aware layout engine** (`server/layout.ts`) reads what the
+document really contains — how many services, how many photographs, whether
+there are reviews, how much there is to read — and composes each section from
+that. Nine services become a numbered index; two become a statement, not a
+grid of two; one review is a quote, not a grid of one. A section with nothing
+in it is switched off, never filled: the research rules say never invent a
+fact, and inventing three services so a grid looks right is the same mistake.
+
+**The design token engine** (`lib/tokens.ts`) turns the chosen architecture,
+the catalogue's style and the business's own character into one coherent
+visual language: type scale and weight, tracking, measure, spacing, container
+width, radius per role, borders, shadows, image treatment, density, motion. A
+luxury hotel comes out with no cards, no shadow, square corners and the airiest
+rhythm; a gym with 750-weight headings, rounded raised cards and expressive
+motion; a law firm dense, banded and quiet. Same inputs, same design, every
+time — the variation is intentional, not random.
+
+**The human design heuristics** (`lib/heuristics.ts`) check the finished
+document against the patterns that make a page look generated: three sections
+built from the same card grid, everything rounded, everything animating,
+boilerplate calls to action, spacing that never varies, sections with nothing
+in them. Each one asks whether the choice is intentional *for this business*
+rather than whether the technique is allowed — generous whitespace passes for a
+spare luxury hotel and is questioned on a page dense with information; the same
+expressive motion passes for a gym and is questioned for a law firm.
+
+**The design critic** (`server/critic.ts`) is the only part that uses Gemini.
+It runs once, only when the heuristics score the page below the threshold, and
+it cannot write the site: it answers with corrections chosen from a fixed list
+of eleven, each applied here in code. A page that already reads as designed
+costs nothing — no request is made at all.
+
 ### What each tier buys you
 
 | Running | Design comes from |
@@ -459,6 +497,7 @@ npm run test:menu       # 47 checks: the Google Sheets menu pipeline
 npm run test:desktop    # 36 checks: the packaged desktop app
 npm run test:setup      # 40 checks: first launch, second launch, recovery
 npm run test:gemini     # 49 checks: the hosted model, its contracts and failures
+npm run test:design-systems  # 59 checks: layout, tokens, heuristics, critic
 ```
 
 `test:gemini` drives the five hosted-AI features — research, visual identity,

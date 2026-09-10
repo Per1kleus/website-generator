@@ -57,6 +57,8 @@ jobs:
         run: npm run test:setup
       - name: Gemini suite
         run: npm run test:gemini
+      - name: Design systems suite
+        run: npm run test:design-systems
 
       - name: Upload QA screenshots
         if: always()
