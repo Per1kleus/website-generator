@@ -11,6 +11,10 @@ Node, no npm, no Python, no Git.
 
 Everything after that first launch is: double-click, the window opens.
 
+Using the application rather than building it?
+[GETTING-STARTED.md](GETTING-STARTED.md) covers the same ground without the
+engineering.
+
 ## Why Tauri, and what actually runs
 
 The application is a Node server — all 44 routes are server-rendered, it uses

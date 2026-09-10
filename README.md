@@ -13,6 +13,13 @@ sections, save a version, export and deploy.
 
 ## Quick start
 
+New to the application, or not a developer? Start with
+[docs/GETTING-STARTED.md](docs/GETTING-STARTED.md) — installing it, the
+first-launch setup, building a first website, and building a digital menu from
+a Google Sheet, in plain English.
+
+To run it from source:
+
 ```bash
 npm install
 npm run build
@@ -353,7 +360,9 @@ retry, or continuing without the optional part. An application update never
 re-downloads a model that is already there.
 
 Full detail — the setup flow, the model ladder, what is and is not installed,
-and the limitations — is in [docs/DESKTOP.md](docs/DESKTOP.md).
+and the limitations — is in [docs/DESKTOP.md](docs/DESKTOP.md). For using the
+application rather than building it, see
+[docs/GETTING-STARTED.md](docs/GETTING-STARTED.md).
 
 **Android** — an `.apk`. A phone cannot run a Node server with native modules
 and a Python subprocess, so the Android app is a client to a deployment rather
