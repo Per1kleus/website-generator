@@ -250,6 +250,9 @@ export type Asset = {
   /** "photo" or "logo" — logos are excluded from the gallery pickers. */
   role: string;
   has_alpha: number;
+  /** Focal point, 0–1 in each axis. 0.5/0.5 when it was never measured. */
+  focal_x: number;
+  focal_y: number;
 };
 
 export function listAssets(projectId: string, role?: string): Asset[] {
@@ -268,11 +271,12 @@ export function getAsset(id: string): Asset | null {
 
 export function insertAsset(a: Omit<Asset, "created_at">): Asset {
   db.prepare(
-    `INSERT INTO assets (id, project_id, filename, mime, width, height, bytes, alt, created_at, role, has_alpha)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO assets (id, project_id, filename, mime, width, height, bytes, alt, created_at, role, has_alpha, focal_x, focal_y)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     a.id, a.project_id, a.filename, a.mime, a.width, a.height, a.bytes, a.alt,
     Date.now(), a.role || "photo", a.has_alpha ? 1 : 0,
+    a.focal_x ?? 0.5, a.focal_y ?? 0.5,
   );
   return getAsset(a.id)!;
 }

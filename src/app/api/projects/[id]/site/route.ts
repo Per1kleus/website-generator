@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/server/auth";
-import { getProject, updateProjectSite } from "@/server/projects";
+import { getProject, listAssets, updateProjectSite } from "@/server/projects";
+import { syncPlacements } from "@/server/images";
 import { validateSiteDoc } from "@/server/ai-edit";
 import { validateSite } from "@/server/validate";
 import type { Site } from "@/lib/site";
@@ -29,7 +30,9 @@ export async function PUT(req: Request, ctx: { params: Promise<{ id: string }> }
 
   // Run the same validation the AI path uses: anything malformed falls back to
   // the stored document rather than corrupting the project.
-  const site = validateSiteDoc(body.site, project.site);
+  // Whatever the creator changed, the page still has to reserve the right box
+  // for every picture it now shows.
+  const site = syncPlacements(validateSiteDoc(body.site, project.site), listAssets(id));
   updateProjectSite(id, user.id, site);
 
   return NextResponse.json({ ok: true, site, warnings: validateSite(site).map((f) => f.message) });

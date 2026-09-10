@@ -5,6 +5,7 @@ import path from "node:path";
 import sharp from "sharp";
 import { db, UPLOAD_DIR } from "../db";
 import { downloadDriveFile, driveFileMeta, GoogleError } from "../google/api";
+import { focalPoint } from "../images";
 
 /**
  * Google Drive image resolution.
@@ -120,13 +121,17 @@ export async function resolveImage(args: {
       .webp({ quality: 82 })
       .toBuffer({ resolveWithObject: true });
 
+    // A dish photograph is shown as a small square, so where the food sits in
+    // the frame decides whether the thumbnail shows the plate or the tablecloth.
+    const focal = await focalPoint(result.data);
+
     const assetId = randomUUID();
     await writeFile(path.join(UPLOAD_DIR, `${assetId}.webp`), result.data);
 
     db.prepare(
       `INSERT INTO assets
-         (id, project_id, filename, mime, width, height, bytes, alt, created_at, role, has_alpha, drive_file_id)
-       VALUES (?, ?, ?, 'image/webp', ?, ?, ?, ?, ?, 'menu', ?, ?)`,
+         (id, project_id, filename, mime, width, height, bytes, alt, created_at, role, has_alpha, drive_file_id, focal_x, focal_y)
+       VALUES (?, ?, ?, 'image/webp', ?, ?, ?, ?, ?, 'menu', ?, ?, ?, ?)`,
     ).run(
       assetId,
       args.projectId,
@@ -138,6 +143,8 @@ export async function resolveImage(args: {
       Date.now(),
       probe.hasAlpha ? 1 : 0,
       fileId,
+      focal.x,
+      focal.y,
     );
 
     // Replace any earlier copy of the same Drive file so a forced re-sync does

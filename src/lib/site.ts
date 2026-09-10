@@ -210,6 +210,49 @@ export type LocaleCatalog = {
   seo: SeoMeta;
 };
 
+/**
+ * What a photograph is doing on the page.
+ *
+ * Decided in server/images.ts from the picture's own measurements, and read by
+ * the renderer so the crop, the reserved space and the loading priority all
+ * follow from the role rather than from one hardcoded box.
+ */
+export type ImageRole = "hero" | "section" | "gallery" | "showcase" | "menu" | "supporting";
+
+export type ImagePlacement = {
+  assetId: string;
+  role: ImageRole;
+  /** The real pixel size, so the page can reserve the right space. */
+  width: number;
+  height: number;
+  /** Where the detail sits, 0–1. Becomes object-position. */
+  focalX: number;
+  focalY: number;
+  ratio: { desktop: string; mobile: string };
+  /** True only for the image at the top of the page. */
+  priority: boolean;
+};
+
+/**
+ * What the research established about the business, carried on the document.
+ *
+ * The renderer needs these to describe the business honestly in its structured
+ * data long after generation — which type of business it is, where it is, and
+ * crucially *which* of those the research actually confirmed. Anything absent
+ * here is simply not claimed.
+ */
+export type BusinessFacts = {
+  category: string;
+  cuisineOrSpecialty: string;
+  location: string;
+  priceRange: string;
+  services: string[];
+  menuHighlights: { name: string; price: string }[];
+  positioning: string;
+  /** Field names the research confirmed with a source. */
+  verifiedFields: string[];
+};
+
 export type Logo = {
   assetId: string;
   /** Rendered at this height in the header; the width follows the aspect ratio. */
@@ -228,9 +271,13 @@ export type Site = {
     locales: Locale[];
     logo: Logo | null;
     stickyCta: { enabled: boolean; href: string };
+    /** Verified research, for honest metadata after generation. */
+    facts?: BusinessFacts;
   };
   theme: Theme;
   sections: Section[];
+  /** How each photograph is being used. Absent when there are none. */
+  images?: ImagePlacement[];
   i18n: Record<Locale, LocaleCatalog>;
 };
 
@@ -469,5 +516,6 @@ export const GENERATION_STEPS: { key: string; label: string }[] = [
   { key: "localize", label: "Languages prepared" },
   { key: "build", label: "Website built" },
   { key: "seo", label: "SEO generated" },
+  { key: "qa", label: "Checked on four screen sizes" },
   { key: "validate", label: "Validation passed" },
 ];

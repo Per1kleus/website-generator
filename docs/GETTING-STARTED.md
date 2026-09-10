@@ -181,7 +181,8 @@ Then press **Generate website**.
 
 A progress screen names each stage as it happens: *Researching the business*,
 *Consulting the design catalogue*, *Analysing the visual identity*, *Writing the
-content*, *Translating*, *Building the website*.
+content*, *Translating*, *Generating SEO metadata*, *Checking the page at four
+screen sizes*, *Building the website*.
 
 You can leave this screen or close the window — it keeps running.
 
@@ -194,6 +195,25 @@ it uses what you typed and nothing more.
 **About the design:** the design catalogue suggests a style, colour system,
 font pairing and section order for this type of business. Nothing is a
 recoloured template — two different businesses genuinely come out different.
+
+**About your photos:** whatever you uploaded before generating is placed, not
+inserted. Each picture is measured, and the strongest wide one leads the page,
+cropped around wherever the detail actually is so nobody's head gets cut off on
+a phone. A tall photo is put in the gallery instead of stretched across the
+top. If you uploaded nothing, you get a page designed for type — never a grey
+box where a photo should be.
+
+**About Google:** the page title, description and the data search engines read
+are built from what the research could actually confirm. If your location was
+never confirmed, it isn't claimed. Ratings and reviews are never invented at
+all.
+
+**The visual check:** before it finishes, the app checks the page at desktop,
+tablet, phone and narrow-phone widths. Anything it can safely fix itself — a
+heading too big for a small screen, an empty section, text that's hard to read
+— it fixes. Anything only you can decide is listed on the project screen under
+**Visual check**, with the exact thing to do. It never rewrites your words to
+make a check pass.
 
 When it's done you'll see **Your website is ready**.
 

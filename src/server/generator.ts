@@ -11,6 +11,12 @@ import { addLocale, ensureSeo } from "./translate";
 import { analyseWithSkill, type SkillDesign } from "./uiux";
 import { applyLayoutPlan, planLayout, type LayoutPlan } from "./layout";
 import { critique, type Critique } from "./critic";
+import { applyAltText, applyImages, assignRoles, inspectAssets, type ImageInsight } from "./images";
+import { applySeo } from "@/lib/seo";
+import { correctSite, type QaOutcome } from "@/lib/qa-fix";
+import { formatReport } from "@/lib/visual-qa";
+import type { Asset } from "./projects";
+import type { BusinessFacts } from "@/lib/site";
 import { ensureFirstLaunch, getState } from "./ollama";
 
 export { hasApiKey };
@@ -19,7 +25,8 @@ export { hasApiKey };
  * The generation pipeline (requirement 29):
  *
  *   INPUT -> RESEARCH -> IDENTITY ANALYSIS -> ARCHITECTURE -> CONTENT
- *         -> LOCALISATION -> BUILD -> SEO -> VALIDATION -> READY
+ *         -> LAYOUT + TOKENS -> IMAGE INTELLIGENCE -> DESIGN REVIEW
+ *         -> LOCALISATION -> SEO -> VISUAL QA -> SAFE CORRECTIONS -> READY
  *
  * Each stage reports progress so the mobile progress screen can show a truthful
  * checklist, and each has a fallback so a failure never leaves a phone-only
@@ -55,6 +62,10 @@ export type GenerationArtifacts = {
   layout: LayoutPlan;
   /** What the design review found, and which corrections were applied. */
   critique: Critique;
+  /** What each photograph was measured to be, and what it was given to do. */
+  images: ImageInsight[];
+  /** The four-viewport check and the corrections it drove. */
+  qa: QaOutcome;
 };
 
 export type StageReporter = (stage: string, message: string) => void;
@@ -62,6 +73,8 @@ export type StageReporter = (stage: string, message: string) => void;
 export async function runGeneration(
   input: GenerationInput,
   report: StageReporter = () => {},
+  /** The project's uploaded photographs. Nothing is invented when empty. */
+  assets: Asset[] = [],
 ): Promise<GenerationArtifacts> {
   const usedAi = hasApiKey();
   const maps = parseMapsUrl(input.mapsUrl);
@@ -195,6 +208,48 @@ export async function runGeneration(
   site = applyLayoutPlan(site, layout);
   for (const note of layout.notes.slice(0, 3)) report("design", note);
 
+  /* 5b-ii. Image intelligence --------------------------------------------
+     Which photograph belongs where, how it is cropped, and what the page
+     reserves for it. All measurement, no model — and no photographs means no
+     photograph-shaped sections rather than a grey box where one should be. */
+  let insights: ImageInsight[] = [];
+  if (assets.length) {
+    report("design", `Placing ${assets.length} photograph${assets.length === 1 ? "" : "s"}`);
+    try {
+      insights = await inspectAssets(assets);
+    } catch (err) {
+      // A picture we cannot measure is a picture we do not place; the page is
+      // still correct without it.
+      console.error("[generate] image inspection failed:", describeError(err));
+    }
+  }
+  const wantsGallery = site.sections.some((s) => s.type === "gallery" && s.visible);
+  const placements = assignRoles(insights, {
+    signals: layout.signals,
+    kind: input.siteKind,
+    wantsGallery,
+  });
+  site = applyImages(site, placements);
+  if (placements.length) {
+    const hero = placements.find((p) => p.role === "hero");
+    report(
+      "design",
+      hero
+        ? `The strongest photograph leads the page, cropped to its focal point`
+        : `Photographs placed in the gallery; the hero is typographic`,
+    );
+  }
+
+  /* Facts, carried on the document ---------------------------------------
+     The renderer describes the business in its structured data long after
+     generation, so what the research actually verified travels with the
+     site rather than staying in a table the page cannot see. */
+  site = { ...site, meta: { ...site.meta, facts: factsFromProfile(profile) } };
+
+  // Alt text before translation, so every language gets it rather than
+  // falling back to the default one.
+  site = applyAltText(site, assets);
+
   /* 5c. Design review -----------------------------------------------------
      Deterministic findings first; a single hosted critique only when they
      show something worth a second opinion. A page that already reads as
@@ -217,10 +272,65 @@ export async function runGeneration(
     }
   }
 
-  /* 7. SEO --------------------------------------------------------------- */
+  /* 7. SEO ----------------------------------------------------------------
+     Built from what the research verified and from copy the page already
+     contains. Nothing is invented: a business whose location was never
+     confirmed simply does not get a location in its title. */
   report("seo", "Generating SEO metadata");
   site = ensureSeo(site);
+  site = applySeo(site, site.meta.facts ?? null);
+
+  /* 8. Visual QA + targeted safe corrections ------------------------------
+     Four widths, the same CSS the renderer emits, evaluated exactly. What can
+     be fixed by changing a design decision is fixed, at most twice; what would
+     need the business's own words changed is reported to the creator instead. */
+  report("qa", "Checking the page at four screen sizes");
+  const imageSizes = Object.fromEntries(
+    assets.map((a) => [a.id, { width: a.width, height: a.height, bytes: a.bytes }]),
+  );
+  const qa = correctSite({ site, locale: input.defaultLocale, images: imageSizes });
+  site = qa.site;
+  for (const correction of qa.applied.slice(0, 3)) report("qa", `Fixed: ${correction.what}`);
+  report(
+    "qa",
+    `Visual QA ${qa.report.score}/100 — ${
+      qa.report.issues.filter((i) => i.level === "error").length
+    } to fix, ${qa.report.issues.filter((i) => i.level === "warning").length} to check`,
+  );
 
   report("build", "Building the website");
-  return { site, profile, identity, usedAi, skill, layout, critique: reviewed.critique };
+  return {
+    site,
+    profile,
+    identity,
+    usedAi,
+    skill,
+    layout,
+    critique: reviewed.critique,
+    images: insights,
+    qa,
+  };
 }
+
+/**
+ * What the research established, in the shape the document carries.
+ *
+ * `verifiedFields` is copied across untouched, because it is the field that
+ * decides whether anything else here may be stated as fact. A value present
+ * but unverified is still not claimed — see lib/seo.ts.
+ */
+function factsFromProfile(profile: BusinessProfile): BusinessFacts {
+  return {
+    category: profile.category,
+    cuisineOrSpecialty: profile.cuisineOrSpecialty,
+    location: profile.location,
+    priceRange: profile.priceRange,
+    services: profile.services.slice(0, 12),
+    menuHighlights: profile.menuHighlights.map((m) => ({ name: m.name, price: m.price })),
+    positioning: profile.positioning,
+    verifiedFields: profile.verifiedFields,
+  };
+}
+
+/** The readable four-viewport summary, for the report and the project screen. */
+export { formatReport as formatQaReport };

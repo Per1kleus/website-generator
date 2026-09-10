@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/server/auth";
-import { getProject, saveVersion, updateProjectSite } from "@/server/projects";
+import { getProject, listAssets, saveVersion, updateProjectSite } from "@/server/projects";
+import { syncPlacements } from "@/server/images";
 import { aiEdit } from "@/server/ai-edit";
 import { validateSite } from "@/server/validate";
 
@@ -25,7 +26,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   saveVersion(id, "Before AI edit", project.site);
 
   const result = await aiEdit(project.site, instruction.trim(), sectionId, locale);
-  if (result.changed) updateProjectSite(id, user.id, result.site);
+  if (result.changed) updateProjectSite(id, user.id, syncPlacements(result.site, listAssets(id)));
 
   return NextResponse.json({
     ok: true,

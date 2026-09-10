@@ -176,6 +176,10 @@ const COLUMNS: [table: string, column: string, ddl: string][] = [
   ["assets", "role", "TEXT NOT NULL DEFAULT 'photo'"],
   ["assets", "has_alpha", "INTEGER NOT NULL DEFAULT 0"],
   ["assets", "drive_file_id", "TEXT NOT NULL DEFAULT ''"],
+  // Where the detail sits in the frame, measured once at upload so a crop
+  // never has to decode the picture again. 0.5/0.5 means "not measured".
+  ["assets", "focal_x", "REAL NOT NULL DEFAULT 0.5"],
+  ["assets", "focal_y", "REAL NOT NULL DEFAULT 0.5"],
 ];
 
 function addColumns(handle: Database.Database) {

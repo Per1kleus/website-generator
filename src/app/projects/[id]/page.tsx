@@ -9,6 +9,7 @@ import { localeInfo } from "@/lib/locales";
 import { AppShell } from "@/components/AppShell";
 import { DesignQuestions, type DesignQuestion } from "@/components/DesignQuestions";
 import { MenuDataCard } from "@/components/MenuDataCard";
+import { VisualQaCard } from "@/components/VisualQaCard";
 import { getMenuSource } from "@/server/menu/source";
 import { AppBar, Banner, Card, LinkButton } from "@/components/ui";
 import {
@@ -16,6 +17,7 @@ import {
   IconPencil, IconRocket, IconSettings, IconSheet,
 } from "@/components/icons";
 import { SITE_KINDS } from "@/lib/site";
+import { auditSite } from "@/lib/visual-qa";
 
 export async function generateMetadata({
   params,
@@ -49,7 +51,21 @@ export default async function ProjectPage({
   const assets = listAssets(id);
   const findings = project.site ? validateSite(project.site) : [];
   // Identity analysis may leave design decisions open; those become questions.
-  const identity = project.designSystem as { questions?: DesignQuestion[] } | null;
+  const identity = project.designSystem as {
+    questions?: DesignQuestion[];
+    qa?: { applied?: { id: string; what: string }[] };
+  } | null;
+  // Re-audited live rather than read from the generation record: the creator
+  // has been editing since, and a stale verdict is worse than none.
+  const qa = project.site
+    ? auditSite({
+        site: project.site,
+        locale: project.site.meta.defaultLocale,
+        images: Object.fromEntries(
+          assets.map((a) => [a.id, { width: a.width, height: a.height, bytes: a.bytes }]),
+        ),
+      })
+    : null;
   const questions = (identity?.questions ?? []).filter((q) => q?.question && q.options?.length);
   const errors = findings.filter((f) => f.level === "error");
   const warnings = findings.filter((f) => f.level === "warning");
@@ -113,6 +129,8 @@ export default async function ProjectPage({
           {isMenuProject && <MenuDataCard projectId={id} source={menuSource} />}
 
           <DesignQuestions projectId={id} questions={questions} />
+
+          {qa && <VisualQaCard report={qa} corrections={identity?.qa?.applied ?? []} />}
 
           {errors.length > 0 && (
             <Banner tone="error">

@@ -5,6 +5,7 @@ import path from "node:path";
 import sharp from "sharp";
 import { getCurrentUser } from "@/server/auth";
 import { getProject, insertAsset, listAssets, setLogo } from "@/server/projects";
+import { focalPoint } from "@/server/images";
 import { UPLOAD_DIR } from "@/server/db";
 import { sanitiseSvg } from "@/server/svg";
 
@@ -116,6 +117,11 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     );
   }
 
+  // Measured once, here, from the picture we just encoded — so cropping it
+  // later never has to decode it again. Logos are placed by their own rules
+  // and do not need one.
+  const focal = role === "logo" ? { x: 0.5, y: 0.5 } : await focalPoint(output);
+
   const assetId = randomUUID();
   await writeFile(path.join(UPLOAD_DIR, `${assetId}.webp`), output);
 
@@ -130,6 +136,8 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     alt: String(form.get("alt") ?? "").trim(),
     role,
     has_alpha: hasAlpha ? 1 : 0,
+    focal_x: focal.x,
+    focal_y: focal.y,
   });
 
   if (role === "logo") setLogo(id, user.id, assetId);

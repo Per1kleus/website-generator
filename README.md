@@ -272,6 +272,53 @@ it cannot write the site: it answers with corrections chosen from a fixed list
 of eleven, each applied here in code. A page that already reads as designed
 costs nothing — no request is made at all.
 
+### 5. Images, SEO and visual QA — always on
+
+Three more deterministic systems, running after the page is composed. None of
+them adds a model call.
+
+**Image intelligence** (`server/images.ts`) decides which photograph belongs
+where, how it is cropped and what the page reserves for it. Every picture is
+measured — dimensions, aspect, resolution, and where the detail actually sits
+in the frame, which sharp can tell us from the image's own statistics — and
+that focal point becomes the `object-position` that keeps a subject in frame
+when a wide photograph is cropped to a phone-shaped band. The focal point is
+computed once, at upload, so generating never decodes a photograph twice. Only
+a photograph large and wide enough to survive a full-bleed crop can lead a
+page; a portrait one moves into the gallery and the hero becomes typographic.
+No photographs means no photograph-shaped sections: the gallery is switched
+off rather than filled, because a grey box is worse than a page designed for
+type.
+
+**The SEO engine** (`lib/seo.ts`) builds the title, description, keywords, alt
+text and schema.org data from what the research actually verified and from copy
+the page already contains. It is keyed on `verifiedFields`: a location nobody
+confirmed does not reach the title, opening hours nobody confirmed are not
+marked up, and ratings and reviews are never published at all — they are the
+properties most worth faking and the ones a search engine penalises hardest
+when they turn out to be false. The verified facts travel on the document
+(`site.meta.facts`), so a page published today still describes the business
+honestly a year later. Anything the creator wrote themselves is left alone.
+
+**Visual QA** (`lib/visual-qa.ts`) checks the page at 1440, 834, 390 and 320px
+and reports a verdict per width, a verdict per category and a score, with every
+issue naming where it is and what to do. It runs with no browser, because the
+packaged Windows application has no browser automation in it and QA that only
+works on a developer's machine is not QA. Instead it evaluates the CSS this
+codebase itself emits: `clamp()` heading sizes at a given viewport, container
+widths against gutters, aspect ratios against real pixel dimensions, and the
+width of the longest unbreakable word given the heading's case and tracking.
+`npm run test:site` proves that arithmetic against Chromium at all four widths;
+the predictions match the engine to within a pixel.
+
+**Targeted safe corrections** (`lib/qa-fix.ts`) fix what can be fixed by
+changing a design decision — a heading scale, a measure, a spacing step, a
+crop, whether an empty section renders — and never a word of the business's own
+content. A headline that does not fit is a type problem before it is a copy
+problem. The loop is bounded at two passes, and a pass that lowers the score is
+thrown away rather than shipped. Everything else, including placeholder copy
+and dead links, is reported to the creator with the specific thing to do.
+
 ### What each tier buys you
 
 | Running | Design comes from |
@@ -498,7 +545,19 @@ npm run test:desktop    # 36 checks: the packaged desktop app
 npm run test:setup      # 40 checks: first launch, second launch, recovery
 npm run test:gemini     # 49 checks: the hosted model, its contracts and failures
 npm run test:design-systems  # 59 checks: layout, tokens, heuristics, critic
+npm run test:site       # 198 checks: visual QA, SEO and image intelligence
 ```
+
+`test:site` is the one suite that puts the deterministic systems in front of a
+real engine. It renders pages, opens them in Chromium at 1440, 834, 390 and
+320px, and compares what visual QA predicted — heading size, usable width, the
+width of the longest word — against what the browser actually computed. It
+feeds the SEO engine research that verified almost nothing and checks that the
+metadata stays silent rather than plausible, and it generates real image files
+whose focal point is known by construction. It finishes by taking six
+businesses (restaurant, hotel, law firm, accounting office, car detailing, gym)
+through composition, images, SEO, QA and correction, and checking each rendered
+page in the browser at all four widths.
 
 `test:gemini` drives the five hosted-AI features — research, visual identity,
 copy, translation and free-form editing — against a stub Gemini, so the client

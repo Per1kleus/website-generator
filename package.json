@@ -24,7 +24,8 @@
     "build:android:bundle": "node scripts/build-android.mjs --bundle",
     "test:setup": "node scripts/setup-qa.mjs",
     "test:gemini": "node scripts/gemini-qa.mjs",
-    "test:design-systems": "node --import tsx --conditions react-server scripts/design-systems-qa.mjs"
+    "test:design-systems": "node --import tsx --conditions react-server scripts/design-systems-qa.mjs",
+    "test:site": "node --import tsx --conditions react-server scripts/site-qa.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.21.0",

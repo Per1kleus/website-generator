@@ -1,8 +1,9 @@
 import { architecture, RHYTHM_SPACING, type DesignArchitecture } from "./architectures";
 import { readableOn } from "./contrast";
 import { localeInfo, type Locale } from "./locales";
-import { fontStack, key, t, type Section, type SectionLayout, type Site } from "./site";
+import { fontStack, key, t, type ImageRole, type Section, type SectionLayout, type Site } from "./site";
 import { tokensForArchitecture } from "./tokens";
+import { buildStructuredData } from "./seo";
 
 /**
  * Renders one locale of a Site document to a standalone HTML page.
@@ -18,6 +19,22 @@ import { tokensForArchitecture } from "./tokens";
  *    metadata, canonical URL and hreflang set, and be indexed properly
  *    (requirements 12 and 16).
  */
+
+/**
+ * The crop for each role, mirrored from server/images.ts.
+ *
+ * Kept here as data rather than imported because the renderer is shared with
+ * the client bundle and must not pull a server module in; the design QA
+ * asserts the two agree.
+ */
+export const ROLE_ASPECT: Record<ImageRole, { desktop: string; mobile: string }> = {
+  hero: { desktop: "16/9", mobile: "4/5" },
+  section: { desktop: "4/3", mobile: "3/2" },
+  gallery: { desktop: "4/5", mobile: "1/1" },
+  showcase: { desktop: "3/2", mobile: "4/3" },
+  menu: { desktop: "1/1", mobile: "1/1" },
+  supporting: { desktop: "3/2", mobile: "3/2" },
+};
 
 const esc = (s: string): string =>
   String(s ?? "")
@@ -191,6 +208,10 @@ h1,h2,h3{
   font-weight:${tk.type.headingWeight};
   line-height:${tk.type.headingLeading};margin:0 0 .5em;text-wrap:balance;
   letter-spacing:${tk.type.headingTracking};
+  /* A last resort, not a design decision: visual QA sizes headings so words
+     fit, but a business name nobody anticipated must break rather than push
+     the whole page sideways on a 320px phone. */
+  overflow-wrap:break-word;
   ${tk.type.headingCase === "upper" ? "text-transform:uppercase;" : ""}
 }
 h1{font-size:clamp(${(1.85 * tk.type.scale).toFixed(2)}rem,${(1.2 * tk.type.scale).toFixed(2)}rem + ${(2.8 * tk.type.scale * tk.type.ratio / 1.25).toFixed(2)}vw,${(3.4 * tk.type.scale * tk.type.ratio / 1.25).toFixed(2)}rem)}
@@ -370,6 +391,29 @@ ${heroStyle === "poster"
      .hero-media{aspect-ratio:3/2;max-width:56rem;margin-inline:auto}`
   : ""}
 
+/* ----------------------------------------------------------- image roles */
+/* A hero and a gallery tile are different picture problems, so they are not
+   cropped to the same box. The ratios come from server/images.ts, and the
+   object-position on each <img> keeps the subject in frame when a wide
+   photograph is cropped to a phone-shaped band. */
+.img-hero{aspect-ratio:${ROLE_ASPECT.hero.mobile}}
+.img-section{aspect-ratio:${ROLE_ASPECT.section.mobile}}
+.img-gallery{aspect-ratio:${ROLE_ASPECT.gallery.mobile}}
+.img-showcase{aspect-ratio:${ROLE_ASPECT.showcase.mobile}}
+.img-supporting{aspect-ratio:${ROLE_ASPECT.supporting.mobile}}
+@media (min-width:52rem){
+  .img-hero{aspect-ratio:${ROLE_ASPECT.hero.desktop}}
+  .img-section{aspect-ratio:${ROLE_ASPECT.section.desktop}}
+  .img-gallery{aspect-ratio:${ROLE_ASPECT.gallery.desktop}}
+  .img-showcase{aspect-ratio:${ROLE_ASPECT.showcase.desktop}}
+  .img-supporting{aspect-ratio:${ROLE_ASPECT.supporting.desktop}}
+}
+/* The role class owns the box; the img fills it and is positioned by focus. */
+.media.img-hero,.media.img-section{height:auto}
+.thumbs figure.img-gallery,.thumbs figure.img-showcase{aspect-ratio:unset}
+.thumbs figure.img-gallery{aspect-ratio:${ROLE_ASPECT.gallery.desktop}}
+.thumbs figure.img-showcase{aspect-ratio:${ROLE_ASPECT.showcase.desktop}}
+
 /* ------------------------------------------------- section compositions */
 /* One set of items can be a card grid, a ruled list, an editorial column or
    a numbered index. Which one a section gets is decided per business in
@@ -511,8 +555,11 @@ blockquote{margin:0;font-size:1.0625rem}
 .cta-band h2::before{background:var(--on-primary)!important;color:var(--on-primary)!important}
 .cta-band .btn{background:var(--on-primary);color:var(--primary);border-color:var(--on-primary)}
 .contact-list{list-style:none;margin:0;padding:0}
-.contact-list a{display:flex;align-items:center;gap:.75rem;min-height:3.25rem;
+/* The row styling belongs to the row, not to the link: an address with no map
+   link is still a row of the same list. */
+.contact-list a,.contact-list li{display:flex;align-items:center;gap:.75rem;min-height:3.25rem;
   text-decoration:none;color:var(--text);border-bottom:var(--rule) solid var(--line)}
+.contact-list li:has(> a){display:block;min-height:0;border-bottom:0}
 
 footer{border-top:var(--rule) solid var(--line);padding-block:2.5rem;
   padding-bottom:calc(2.5rem + var(--safe-b));color:var(--muted);font-size:.9375rem}
@@ -554,6 +601,39 @@ function navLinks(site: Site, locale: Locale): { href: string; label: string }[]
     .filter((l) => l.label);
 }
 
+/**
+ * The attributes one photograph needs.
+ *
+ * Real width and height so the browser reserves the right box before the file
+ * arrives — a hardcoded 1400×1050 on a portrait photograph is a layout shift
+ * waiting to happen. Focal point so a wide picture cropped to a phone-shaped
+ * band keeps its subject. Priority only at the top of the page; everything
+ * else is lazy.
+ */
+function imageAttrs(site: Site, assetId: string, fallbackRole: ImageRole): {
+  attrs: string;
+  style: string;
+  ratioClass: string;
+} {
+  const placement = site.images?.find((p) => p.assetId === assetId);
+  const role = placement?.role ?? fallbackRole;
+  const width = placement?.width ?? 1400;
+  const height = placement?.height ?? 1050;
+  const focal =
+    placement && (placement.focalX !== 0.5 || placement.focalY !== 0.5)
+      ? `object-position:${(placement.focalX * 100).toFixed(1)}% ${(placement.focalY * 100).toFixed(1)}%;`
+      : "";
+  const priority = placement?.priority ?? role === "hero";
+
+  return {
+    attrs: `width="${width}" height="${height}" ${
+      priority ? 'fetchpriority="high" decoding="async"' : 'loading="lazy" decoding="async"'
+    }`,
+    style: focal,
+    ratioClass: `img-${role}`,
+  };
+}
+
 function renderSection(s: Section, site: Site, locale: Locale, opts: RenderOptions): string {
   if (!s.visible) return "";
   const id = esc(s.id);
@@ -564,8 +644,11 @@ function renderSection(s: Section, site: Site, locale: Locale, opts: RenderOptio
   switch (s.type) {
     case "hero": {
       const img = imageUrl(s.imageId, opts);
-      const media = img
-        ? `<div class="media hero-media"><img src="${esc(img)}" alt="${esc(t(site, locale, key.meta("logoAlt")) || "")}" width="1400" height="1050" fetchpriority="high" decoding="async"></div>`
+      const heroImg = img ? imageAttrs(site, s.imageId, "hero") : null;
+      const media = img && heroImg
+        ? `<div class="media hero-media ${heroImg.ratioClass}"><img src="${esc(img)}" alt="${esc(
+            t(site, locale, key.section(s.id, "imageAlt")) || t(site, locale, key.meta("logoAlt")) || "",
+          )}" ${heroImg.attrs} style="${heroImg.style}"></div>`
         : "";
       return `<section class="hero" id="${id}" aria-labelledby="${id}-h"><div class="wrap">
 <div class="hero-copy">
@@ -585,8 +668,11 @@ ${media}
       const body = str("body").split(/\n{2,}/).filter(Boolean);
       const layout = s.layout ?? "editorial";
       const prose = body.map((p) => `<p>${esc(p)}</p>`).join("");
-      const media = img
-        ? `<div class="media hero-media"><img src="${esc(img)}" alt="" loading="lazy" decoding="async" width="1200" height="900"></div>`
+      const aboutImg = img ? imageAttrs(site, s.imageId, "section") : null;
+      const media = img && aboutImg
+        ? `<div class="media hero-media ${aboutImg.ratioClass}"><img src="${esc(img)}" alt="${esc(
+            t(site, locale, key.section(s.id, "imageAlt")),
+          )}" ${aboutImg.attrs} style="${aboutImg.style}"></div>`
         : "";
 
       // Highlights are short facts, not a product grid. Boxing three of them
@@ -707,10 +793,12 @@ ${desc ? `<p class="desc">${esc(desc)}</p>` : ""}
       if (!imgs.length) return "";
       const layout = s.layout ?? "grid";
       const figures = imgs
-        .map(
-          (im) =>
-            `<figure><img src="${esc(im.url)}" alt="${esc(row(im.id, "alt"))}" loading="lazy" decoding="async" width="800" height="1000"></figure>`,
-        )
+        .map((im) => {
+          const meta = imageAttrs(site, im.id, "gallery");
+          return `<figure class="${meta.ratioClass}"><img src="${esc(im.url)}" alt="${esc(
+            row(im.id, "alt"),
+          )}" ${meta.attrs} style="${meta.style}"></figure>`;
+        })
         .join("");
       // A mosaic gives the first image real weight; a strip suits two or three
       // pictures that would look stranded in a grid.
@@ -772,7 +860,13 @@ ${str("ctaLabel") ? `<div class="btns"><a class="btn" href="${safeHref(s.ctaHref
 <ul class="contact-list">
 ${s.phone ? `<li><a href="tel:${esc(s.phone.replace(/[^\d+]/g, ""))}"><span aria-hidden="true">📞</span><span>${esc(s.phone)}</span></a></li>` : ""}
 ${s.email ? `<li><a href="mailto:${esc(s.email)}"><span aria-hidden="true">✉️</span><span>${esc(s.email)}</span></a></li>` : ""}
-${str("address") ? `<li><a href="${safeHref(s.mapsUrl || "#")}"${s.mapsUrl ? ' target="_blank" rel="noopener"' : ""}><span aria-hidden="true">📍</span><span>${esc(str("address"))}</span></a></li>` : ""}
+${str("address")
+  // Without a map link there is nowhere for the address to go, and a link to
+  // "#" is a tap that does nothing — worse than plain text.
+  ? s.mapsUrl
+    ? `<li><a href="${safeHref(s.mapsUrl)}" target="_blank" rel="noopener"><span aria-hidden="true">📍</span><span>${esc(str("address"))}</span></a></li>`
+    : `<li><span aria-hidden="true">📍</span><span>${esc(str("address"))}</span></li>`
+  : ""}
 </ul>
 ${s.bookingUrl && str("bookingLabel") ? `<div class="btns" style="margin-top:1.5rem"><a class="btn" href="${safeHref(s.bookingUrl)}">${esc(str("bookingLabel"))}</a></div>` : ""}
 </div></section>`;
@@ -809,34 +903,19 @@ function languageSwitcher(
 
 /** JSON-LD. Only fields that actually exist are emitted — never invented. */
 function structuredData(site: Site, locale: Locale, opts: RenderOptions): string {
-  const contact = site.sections.find((s) => s.type === "contact");
-  const hours = site.sections.find((s) => s.type === "hours");
-  const seo = site.i18n[locale]?.seo;
-
-  const data: Record<string, unknown> = {
-    "@context": "https://schema.org",
-    "@type": site.meta.kind === "menu" ? "Restaurant" : "LocalBusiness",
-    name: site.meta.businessName,
-    inLanguage: locale,
-  };
-  if (seo?.description) data.description = seo.description;
-  if (opts.canonical) data.url = opts.canonical;
-
-  if (contact && contact.type === "contact") {
-    if (contact.phone) data.telephone = contact.phone;
-    if (contact.email) data.email = contact.email;
-    const address = t(site, locale, key.section(contact.id, "address"));
-    if (address) data.address = { "@type": "PostalAddress", streetAddress: address };
-    if (contact.mapsUrl) data.hasMap = contact.mapsUrl;
-  }
-  if (hours && hours.type === "hours" && hours.rows.length) {
-    data.openingHours = hours.rows.map(
-      (r) => `${t(site, locale, key.row(hours.id, r.id, "day"))} ${r.hours}`.trim(),
-    );
-  }
-  if (site.meta.logo && opts.assetUrl) {
-    data.logo = opts.assetUrl(site.meta.logo.assetId);
-  }
+  // Built by the SEO engine, which includes only what the research verified:
+  // no ratings, no unconfirmed opening hours, no invented address.
+  const data = buildStructuredData(
+    { site, locale, facts: site.meta.facts ?? null },
+    {
+      canonical: opts.canonical,
+      logoUrl: site.meta.logo && opts.assetUrl ? opts.assetUrl(site.meta.logo.assetId) : undefined,
+      imageUrls: (site.images ?? [])
+        .filter((p) => p.role === "hero" || p.role === "gallery" || p.role === "showcase")
+        .map((p) => (opts.assetUrl ? opts.assetUrl(p.assetId) : `/api/assets/${p.assetId}`))
+        .filter(Boolean),
+    },
+  );
 
   return `<script type="application/ld+json">${JSON.stringify(data).replace(/</g, "\\u003c")}</script>`;
 }

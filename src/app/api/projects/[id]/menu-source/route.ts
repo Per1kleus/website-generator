@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/server/auth";
-import { getProject, saveVersion, updateProjectSite } from "@/server/projects";
+import { getProject, listAssets, saveVersion, updateProjectSite } from "@/server/projects";
+import { syncPlacements } from "@/server/images";
 import { connectionInfo, googleConfigured } from "@/server/google/oauth";
 import { REQUIRED_COLUMNS, SUGGESTED_CATEGORIES } from "@/server/menu/processor";
 import {
@@ -106,7 +107,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
 
   // A snapshot before each sync, so a bad spreadsheet edit is always undoable.
   saveVersion(id, `Before menu sync`, project.site);
-  updateProjectSite(id, user.id, result.site);
+  updateProjectSite(id, user.id, syncPlacements(result.site, listAssets(id)));
 
   // Push the new data to an already-live site. Only the menu content changes;
   // the design is regenerated from the same unchanged theme.

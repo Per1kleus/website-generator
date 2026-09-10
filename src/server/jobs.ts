@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { GENERATION_STEPS, type Site } from "@/lib/site";
 import { db } from "./db";
 import { runGeneration, type GenerationInput } from "./generator";
+import { listAssets } from "./projects";
 import { validateSite, type Finding } from "./validate";
 
 /**
@@ -112,9 +113,16 @@ export function startGeneration(projectId: string, input: GenerationInput): Job 
 
 async function run(jobId: string, projectId: string, input: GenerationInput) {
   try {
-    const { site, profile, identity, usedAi, skill, layout, critique } = await runGeneration(input, (stage, message) => {
-      reportStage(jobId, stage, message);
-    });
+    const { site, profile, identity, usedAi, skill, layout, critique, images, qa } =
+      await runGeneration(
+        input,
+        (stage, message) => {
+          reportStage(jobId, stage, message);
+        },
+        // The photographs the creator uploaded before generating. Image
+        // intelligence works from these and invents nothing when there are none.
+        listAssets(projectId),
+      );
 
     reportStage(jobId, "validate", "Running validation");
     const findings = validateSite(site, profile);
@@ -141,6 +149,30 @@ async function run(jobId: string, projectId: string, input: GenerationInput) {
           consulted: critique.consulted,
           notes: critique.notes,
           findings: critique.findings.map((f) => ({ id: f.id, severity: f.severity, issue: f.issue })),
+        },
+        images: images.map((i) => ({
+          id: i.id,
+          shape: i.shape,
+          aspect: i.aspect,
+          focal: i.focal,
+          heroCapable: i.heroCapable,
+          role: site.images?.find((p) => p.assetId === i.id)?.role ?? "unused",
+        })),
+        qa: {
+          score: qa.report.score,
+          viewports: qa.report.viewports,
+          categories: qa.report.categories,
+          passes: qa.passes,
+          applied: qa.applied,
+          issues: qa.report.issues.map((i) => ({
+            id: i.id,
+            level: i.level,
+            category: i.category,
+            viewports: i.viewports,
+            issue: i.issue,
+            location: i.location,
+            correction: i.correction,
+          })),
         },
       }),
       site.meta.defaultLocale,
