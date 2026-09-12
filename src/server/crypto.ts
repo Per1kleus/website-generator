@@ -22,6 +22,15 @@ function keyMaterial(): Buffer {
   return createHash("sha256").update(secret).digest();
 }
 
+/**
+ * A key for a purpose other than token encryption, derived from the same
+ * secret. Separating by label means a signature minted for one purpose can
+ * never be replayed as another.
+ */
+export function derivedKey(purpose: string): Buffer {
+  return createHash("sha256").update(keyMaterial()).update(purpose).digest();
+}
+
 export function encryptSecret(plain: string): string {
   if (!plain) return "";
   const iv = randomBytes(12);

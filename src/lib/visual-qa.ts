@@ -4,6 +4,7 @@ import { key, t, type DesignTokens, type Section, type Site } from "./site";
 import { tokensForArchitecture } from "./tokens";
 import { auditSeo, isPlaceholder } from "./seo";
 import type { Locale } from "./locales";
+import { VIEWPORTS, type ViewportId } from "./viewports";
 
 /**
  * Visual QA.
@@ -25,14 +26,9 @@ import type { Locale } from "./locales";
  * what a real engine does. See scripts/site-qa.mjs.
  */
 
-export const VIEWPORTS = [
-  { id: "desktop", label: "Desktop", width: 1440 },
-  { id: "tablet", label: "Tablet", width: 834 },
-  { id: "mobile", label: "Mobile", width: 390 },
-  { id: "narrow", label: "Narrow mobile", width: 320 },
-] as const;
-
-export type ViewportId = (typeof VIEWPORTS)[number]["id"];
+// The widths live in lib/viewports.ts, shared with the live preview: the
+// creator inspects by hand exactly the widths this audits.
+export { VIEWPORTS, type ViewportId } from "./viewports";
 
 export type QaCategory =
   | "layout"

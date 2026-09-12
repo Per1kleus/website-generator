@@ -263,8 +263,16 @@ async function main() {
   await other.close();
   await page.bringToFront();
 
-  await page.getByText("Your website is ready", { exact: false }).first().waitFor({ timeout: 240000 });
+  // Completion is the website appearing, not a form of words: the generation
+  // screen turns into the live preview by itself when the job finishes.
+  await page.locator("iframe[data-preview-frame]").waitFor({ timeout: 240000 });
   record("generation completes while the app was backgrounded", true);
+  record(
+    "the finished website appears without being asked for",
+    await page.getByText("Website generated successfully.").isVisible(),
+  );
+  await page.frameLocator("iframe[data-preview-frame]").locator("footer").waitFor({ timeout: 30000 });
+  record("the generated website is shown inside the application", true);
   await page.screenshot({ path: `${SHOTS}/08-generated.png` });
 
   const projectUrl = page.url().replace(/\/generate$/, "");
@@ -274,35 +282,38 @@ async function main() {
   await page.goto(`${projectUrl}/preview`, { waitUntil: "networkidle" });
   await checkNoHorizontalOverflow(page, "preview");
   await checkTargets(page, "preview", POINTER_TARGET);
-  const devices = await page.getByRole("radio").count();
+  const widthGroup = page.getByRole("radiogroup", { name: "Preview width" });
+  const devices = await widthGroup.getByRole("radio").count();
   record(
-    "the preview offers phone, tablet and desktop widths",
-    devices >= 3,
+    "the preview offers every width the visual QA audits",
+    devices >= 4,
     `${devices} device options`,
   );
 
   // The iframe must render the site at a real mobile viewport, not scaled down.
-  const frame = page.frameLocator("iframe");
+  await widthGroup.getByRole("radio", { name: "Mobile", exact: true }).click();
+  const frame = page.frameLocator("iframe[data-preview-frame]");
   await frame.locator("body").waitFor({ timeout: 15000 });
   const innerWidth = await page.evaluate(
-    () => document.querySelector("iframe")?.getBoundingClientRect().width ?? 0,
+    () => document.querySelector("iframe[data-preview-frame]")?.getBoundingClientRect().width ?? 0,
   );
   record("mobile preview renders at native width (no shrunken desktop)", innerWidth >= 320 && innerWidth <= 400, `${Math.round(innerWidth)}px`);
   await page.screenshot({ path: `${SHOTS}/09-preview-mobile.png` });
 
-  await page.getByRole("radio", { name: "Desktop" }).click();
+  await widthGroup.getByRole("radio", { name: "Desktop", exact: true }).click();
   await page.waitForTimeout(600);
   await checkNoHorizontalOverflow(page, "preview (desktop mode)");
   await page.screenshot({ path: `${SHOTS}/10-preview-desktop.png` });
-  await page.getByRole("radio", { name: "Mobile" }).click();
+  await widthGroup.getByRole("radio", { name: "Mobile", exact: true }).click();
 
   /* 5b. Visitor language system ------------------------------------------ */
   // The preview renders the real per-language document, so asserting here is
   // asserting what a visitor actually receives.
-  const previewFrame = page.frameLocator("iframe");
+  const previewFrame = page.frameLocator("iframe[data-preview-frame]");
+  const langGroup = page.getByRole("radiogroup", { name: "Preview language" });
   record(
     "preview offers a language selector when 2 languages are enabled",
-    await page.getByRole("radio", { name: /Greek/ }).isVisible(),
+    await langGroup.getByRole("radio", { name: /Greek/ }).isVisible(),
   );
 
   const elDoc = await page.evaluate(async (pid) => {
@@ -347,10 +358,10 @@ async function main() {
   const pricesOf = (doc) => (doc.match(/<span class="price">([^<]*)<\/span>/g) ?? []).join("|");
   record("prices are never translated", pricesOf(elDoc) === pricesOf(enDoc));
 
-  await page.getByRole("radio", { name: /English/ }).click();
+  await langGroup.getByRole("radio", { name: /English/ }).click();
   await page.waitForTimeout(800);
   await page.screenshot({ path: `${SHOTS}/09b-preview-english.png` });
-  await page.getByRole("radio", { name: /Greek/ }).click();
+  await langGroup.getByRole("radio", { name: /Greek/ }).click();
 
   /* 5c. Language management ---------------------------------------------- */
   await page.goto(`${projectUrl}/languages`, { waitUntil: "networkidle" });
@@ -762,7 +773,7 @@ async function main() {
 
   await page.goto(`${secondUrl}/preview`, { waitUntil: "domcontentloaded" });
   await page.waitForTimeout(1500);
-  const visibleText = await page.frameLocator("iframe").locator("h1").first().innerText();
+  const visibleText = await page.frameLocator("iframe[data-preview-frame]").locator("h1").first().innerText();
   record(
     "headline text renders even though the web font is unreachable",
     visibleText.trim().length > 0,

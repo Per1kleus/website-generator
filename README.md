@@ -328,6 +328,23 @@ and dead links, is reported to the creator with the specific thing to do.
 | Catalogue + Ollama | The above, with a far better-matched category |
 | All three | The above, reconciled against the actual business and its logo |
 
+### Seeing the result
+
+The generated website is shown inside the application, never in a file the
+creator has to go and find. The moment generation finishes, the progress screen
+becomes a live preview of the site; the same preview sits on the project screen
+and beside the section list in the editor.
+
+It is the real thing: the preview frame loads `/api/projects/<id>/render`,
+which calls the same `renderSite()` that produces the exported ZIP and the
+published site. Choosing Mobile makes the frame genuinely 390px wide, so the
+website's own media queries decide what changes — the four widths on offer are
+the same four `lib/visual-qa.ts` audits, so a creator can look at the width a
+warning came from. The generated page runs sandboxed in an origin of its own
+and cannot reach this application's cookies, DOM or API. `docs/PREVIEW.md` has
+the details, including the two URL differences between preview and published
+output and how they are tested.
+
 ### Contrast is guaranteed, not assumed
 
 A palette can arrive from a hosted model, the catalogue, or a colour picker,
@@ -546,7 +563,18 @@ npm run test:setup      # 40 checks: first launch, second launch, recovery
 npm run test:gemini     # 49 checks: the hosted model, its contracts and failures
 npm run test:design-systems  # 59 checks: layout, tokens, heuristics, critic
 npm run test:site       # 198 checks: visual QA, SEO and image intelligence
+npm run test:preview    # 60 checks: the integrated live preview
 ```
+
+`test:preview` generates a real website and then holds the preview to its one
+promise — that it *is* the website. It runs the publisher (`buildBundle`) over
+the same document and compares the result byte for byte with what the preview
+served, so a second rendering path cannot be introduced without the suite
+failing. It also measures what the framed document reports as its own viewport
+width at each device button, tries from inside the generated page to read the
+session, call a builder endpoint and reach the builder's DOM (each must fail),
+and checks that a failed render surfaces "Preview unavailable" with a retry
+rather than a blank panel. See `docs/PREVIEW.md`.
 
 `test:site` is the one suite that puts the deterministic systems in front of a
 real engine. It renders pages, opens them in Chromium at 1440, 834, 390 and

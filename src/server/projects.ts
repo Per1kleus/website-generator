@@ -88,6 +88,19 @@ export function getProject(id: string, userId: string): Project | null {
   return row ? hydrate(row) : null;
 }
 
+/**
+ * A project looked up by id alone, for the preview.
+ *
+ * Deliberately not scoped by user: the caller has already proved access with a
+ * preview token, which names this exact project and cannot be minted without
+ * the app secret. Nothing else may use this — every other read goes through
+ * `getProject`, where ownership is enforced at the query.
+ */
+export function getProjectForPreview(id: string): Project | null {
+  const row = db.prepare("SELECT * FROM projects WHERE id = ?").get(id) as ProjectRow | undefined;
+  return row ? hydrate(row) : null;
+}
+
 export type NewProject = {
   userId: string;
   name: string;

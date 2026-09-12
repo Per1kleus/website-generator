@@ -3,20 +3,29 @@ import path from "node:path";
 import sharp from "sharp";
 import { getCurrentUser } from "@/server/auth";
 import { getAsset, getProject } from "@/server/projects";
+import { readPreviewToken } from "@/server/preview-token";
 import { UPLOAD_DIR } from "@/server/db";
 
 /**
  * Serves an uploaded image, optionally resized via ?w=.
  * Ownership is checked on every request — assets are not public URLs.
+ *
+ * The live preview is the one caller without a session: it runs the generated
+ * website in a frame with no origin, so its requests carry no cookies. Those
+ * are authorised by a read-only preview token naming one project, and a token
+ * for a different project is worth exactly as much here as no token at all.
  */
 export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }) {
-  const user = await getCurrentUser();
-  if (!user) return new Response("Not signed in", { status: 401 });
-
   const { id } = await ctx.params;
   const asset = getAsset(id);
   if (!asset) return new Response("Not found", { status: 404 });
-  if (!getProject(asset.project_id, user.id)) return new Response("Not found", { status: 404 });
+
+  const token = new URL(req.url).searchParams.get("pt") ?? "";
+  if (readPreviewToken(token) !== asset.project_id) {
+    const user = await getCurrentUser();
+    if (!user) return new Response("Not signed in", { status: 401 });
+    if (!getProject(asset.project_id, user.id)) return new Response("Not found", { status: 404 });
+  }
 
   let data: Buffer;
   try {

@@ -10,6 +10,7 @@ import { AppShell } from "@/components/AppShell";
 import { DesignQuestions, type DesignQuestion } from "@/components/DesignQuestions";
 import { MenuDataCard } from "@/components/MenuDataCard";
 import { VisualQaCard } from "@/components/VisualQaCard";
+import { SitePreview } from "@/components/SitePreview";
 import { getMenuSource } from "@/server/menu/source";
 import { AppBar, Banner, Card, LinkButton } from "@/components/ui";
 import {
@@ -117,13 +118,26 @@ export default async function ProjectPage({
 
       {project.site && (
         <>
+          {/* The website itself, not a button that leads to it. Someone
+              arriving here should see what they made. */}
+          <section className="my-4" aria-label="Live preview">
+            <SitePreview
+              projectId={id}
+              businessName={project.business_name}
+              locales={project.site.meta.locales}
+              defaultLocale={project.site.meta.defaultLocale}
+              initialDevice="desktop"
+            />
+          </section>
+
           <LinkButton
             href={`/projects/${id}/preview`}
+            variant="secondary"
             size="lg"
             block
-            className="my-4"
+            className="mb-4"
           >
-            <IconEye size={20} /> Preview website
+            <IconEye size={20} /> Open full-screen preview
           </LinkButton>
 
           {isMenuProject && <MenuDataCard projectId={id} source={menuSource} />}

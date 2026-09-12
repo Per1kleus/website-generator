@@ -5,7 +5,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { AppShell } from "./AppShell";
 import { AppBar, Banner, Button, LinkButton } from "./ui";
 import { IconAlert, IconCheck } from "./icons";
+import { SitePreview } from "./SitePreview";
 import { GENERATION_STEPS } from "@/lib/site";
+import type { Locale } from "@/lib/locales";
 import type { Job, JobStep } from "@/server/jobs";
 
 /**
@@ -17,21 +19,32 @@ import type { Job, JobStep } from "@/server/jobs";
  * Crucially the progress here is *read from the backend*, never simulated. If
  * the user locks their phone, takes a call, or force-quits the app, the work
  * keeps running server-side and this screen resyncs on return.
+ *
+ * The moment it finishes, the checklist is replaced by the website itself. The
+ * last thing a creator should have to do after waiting for a generation is go
+ * looking for the result — so the same live preview the editor uses loads
+ * here, at full width, with the device buttons already on it.
  */
 export function GenerationProgress({
   projectId,
   businessName,
   initialStatus,
   initialJob,
+  site,
 }: {
   projectId: string;
   businessName: string;
   initialStatus: string;
   initialJob: Job | null;
+  /** Known once the site exists; null while it is still being generated. */
+  site: { locales: Locale[]; defaultLocale: Locale } | null;
 }) {
   const router = useRouter();
   const [job, setJob] = useState<Job | null>(initialJob);
   const [status, setStatus] = useState(initialStatus);
+  // Arrives with the poll that reports the job done, so the preview can open
+  // on the spot rather than after a navigation.
+  const [siteInfo, setSiteInfo] = useState(site);
   const [offline, setOffline] = useState(false);
   const started = useRef(false);
 
@@ -42,6 +55,7 @@ export function GenerationProgress({
       const data = await res.json();
       setJob(data.job);
       setStatus(data.status);
+      if (data.site) setSiteInfo(data.site);
       setOffline(false);
     } catch {
       // Losing signal mid-generation is normal on mobile. Say so, keep polling,
@@ -95,6 +109,44 @@ export function GenerationProgress({
       ...s,
       status: i === 0 ? ("active" as const) : ("pending" as const),
     }));
+
+  // Once the site exists, this screen *is* the preview. The checklist has
+  // nothing left to say and the website has everything.
+  if (done && siteInfo) {
+    return (
+      <AppShell wide>
+        <AppBar title="Website ready" subtitle={businessName} back="/" />
+
+        <Banner tone="success">
+          <span className="font-bold">Website generated successfully.</span>{" "}
+          {job?.message && job.message !== "Your website is ready" ? job.message : null}
+        </Banner>
+
+        <SitePreview
+          projectId={projectId}
+          businessName={businessName}
+          locales={siteInfo.locales}
+          defaultLocale={siteInfo.defaultLocale}
+          initialDevice="desktop"
+        />
+
+        <div className="mt-4 flex flex-col gap-2.5 sm:flex-row">
+          <LinkButton href={`/projects/${projectId}/edit`} size="lg" block className="sm:flex-1">
+            Edit this website
+          </LinkButton>
+          <Button
+            variant="secondary"
+            size="lg"
+            block
+            className="sm:flex-1"
+            onClick={() => router.push(`/projects/${projectId}`)}
+          >
+            Go to project
+          </Button>
+        </div>
+      </AppShell>
+    );
+  }
 
   return (
     <AppShell>
@@ -217,11 +269,13 @@ export function GenerationProgress({
         </div>
       )}
 
+      {/* Reached only when the job says done but no site document came back
+          with it — a state worth a way forward rather than a dead end. */}
       {done && (
         <div className="mx-auto mt-8 flex max-w-sm flex-col gap-3">
-          <LinkButton href={`/projects/${projectId}/preview`} size="lg" block>
-            View your website
-          </LinkButton>
+          <Button size="lg" block onClick={() => router.refresh()}>
+            Show my website
+          </Button>
           <Button
             variant="secondary"
             size="lg"

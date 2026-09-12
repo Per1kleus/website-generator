@@ -6,6 +6,7 @@ import { AppBar, Banner, Button, Card, LinkButton, useToast } from "./ui";
 import { SectionSheet } from "./SectionSheet";
 import { AiSheet } from "./AiSheet";
 import { LocaleTabs } from "./LocaleTabs";
+import { SitePreview, type PreviewHandle } from "./SitePreview";
 import { IconDown, IconDrag, IconEye, IconEyeOff, IconPencil, IconSparkles, IconUp } from "./icons";
 import { localeInfo, type Locale } from "@/lib/locales";
 import {
@@ -55,8 +56,8 @@ export function SectionEditor({
   const [error, setError] = useState("");
   const [warnings, setWarnings] = useState<string[]>([]);
   const [dragId, setDragId] = useState<string | null>(null);
-  /** Bumped after every save so the preview reloads with what was saved. */
-  const [previewNonce, setPreviewNonce] = useState(0);
+  /** Reloads the preview frame after a save, without remounting it. */
+  const previewRef = useRef<PreviewHandle>(null);
   const { toast, toastNode } = useToast();
   const listRef = useRef<HTMLUListElement>(null);
 
@@ -78,7 +79,9 @@ export function SectionEditor({
         setSite(data.site);
         setWarnings(data.warnings ?? []);
         setDirty(false);
-        setPreviewNonce((n) => n + 1);
+        // Only the frame's document reloads — the workspace, the open list and
+        // the scroll position all stay where they were.
+        previewRef.current?.refresh();
         toast(message);
         return true;
       } catch {
@@ -299,7 +302,7 @@ export function SectionEditor({
           <div className="sticky top-4">
             <div className="mb-2 flex items-center justify-between">
               <p className="text-xs font-semibold uppercase tracking-wide text-muted">
-                Live preview · {localeInfo(locale).english}
+                Live preview
               </p>
               <LinkButton
                 href={`/projects/${projectId}/preview`}
@@ -309,17 +312,24 @@ export function SectionEditor({
                 Open full preview
               </LinkButton>
             </div>
-            <div className="overflow-hidden rounded-card border border-line bg-surface">
-              <iframe
-                key={`${locale}-${previewNonce}`}
-                title="Website preview"
-                src={`/api/projects/${projectId}/render?locale=${encodeURIComponent(locale)}`}
-                className="h-[calc(100svh-9rem)] w-full border-0 bg-white"
-                // The same sandbox as the full preview screen: the generated
-                // page's own scripts run, but it cannot navigate the workspace.
-                sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
-                loading="lazy"
-              />
+            <div className="h-[calc(100svh-9rem)]">
+            <SitePreview
+              handleRef={previewRef}
+              projectId={projectId}
+              businessName={businessName}
+              locales={site.meta.locales}
+              defaultLocale={site.meta.defaultLocale}
+              // The panel follows the locale tabs: editing the Greek copy
+              // previews the Greek page, with no second language control.
+              locale={locale}
+              fill
+              initialDevice="desktop"
+              compact
+              allowCustomWidth={false}
+              staleNote={
+                dirty ? "You have unsaved changes — the preview shows the last saved version." : ""
+              }
+            />
             </div>
           </div>
         </aside>

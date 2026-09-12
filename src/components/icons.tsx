@@ -85,6 +85,18 @@ export const IconDesktop = ({ className, size }: P) => (
     <path d="M8 20h8M12 16v4" />
   </svg>
 );
+/** A handset narrower than the phone icon — the 320px test width. */
+export const IconMobileNarrow = ({ className, size }: P) => (
+  <svg {...base(size)} className={className}>
+    <rect x="7" y="2" width="10" height="20" rx="2" />
+    <path d="M11 18.5h2" />
+  </svg>
+);
+export const IconRefresh = ({ className, size }: P) => (
+  <svg {...base(size)} className={className}>
+    <path d="M21 12a9 9 0 11-2.6-6.4M21 4v5h-5" />
+  </svg>
+);
 export const IconUp = ({ className, size }: P) => (
   <svg {...base(size)} className={className}>
     <path d="M12 19V5M5 12l7-7 7 7" />

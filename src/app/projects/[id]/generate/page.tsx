@@ -27,6 +27,14 @@ export default async function GeneratePage({
       businessName={project.business_name}
       initialStatus={project.status}
       initialJob={getLatestJob(project.id)}
+      site={
+        project.site
+          ? {
+              locales: project.site.meta.locales,
+              defaultLocale: project.site.meta.defaultLocale,
+            }
+          : null
+      }
     />
   );
 }

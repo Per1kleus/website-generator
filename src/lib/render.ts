@@ -265,7 +265,9 @@ ${a.headingOrnament === "rule" || tk.surface.divider === "rule"
 }
 .site-header .bar{display:flex;align-items:center;gap:1rem;min-height:3.5rem}
 .brand{
-  display:inline-flex;align-items:center;gap:.6rem;
+  /* The business name in the header is a link home, so it is something people
+     tap — and a 27px-tall line of text is not a tap target. */
+  display:inline-flex;align-items:center;gap:.6rem;min-height:2.75rem;
   font-family:${stackFor(site, "heading")};
   font-weight:750;font-size:1.0625rem;text-decoration:none;color:var(--text);
   ${a.headingCase === "upper" ? "text-transform:uppercase;letter-spacing:.12em;font-size:.9375rem;" : ""}
@@ -281,7 +283,6 @@ ${a.headingOrnament === "rule" || tk.surface.divider === "rule"
     ${a.headingCase === "upper" ? "text-transform:uppercase;letter-spacing:.1em;font-size:.8125rem;" : ""}
   }
   .nav-desktop a:hover{color:var(--primary)}
-  .nav-toggle{display:none}
 }
 ${a.nav === "centered"
   ? `@media (min-width:52rem){
@@ -304,6 +305,10 @@ ${a.nav === "sidebarish"
   border-radius:${btnRadius === "999px" ? "999px" : `${radius}px`};
   background:transparent;color:var(--text);cursor:pointer;
 }
+/* After the rule above, not inside the block with the desktop nav: two rules
+   of equal specificity are settled by order, so hiding the toggle before
+   declaring it left every desktop page with a hamburger beside its menu. */
+@media (min-width:52rem){.nav-toggle{display:none}}
 #nav-open{position:absolute;opacity:0;pointer-events:none;width:1px;height:1px}
 .nav-mobile{display:none;padding-bottom:.75rem}
 #nav-open:checked ~ .wrap .nav-mobile{display:block}

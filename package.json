@@ -25,7 +25,8 @@
     "test:setup": "node scripts/setup-qa.mjs",
     "test:gemini": "node scripts/gemini-qa.mjs",
     "test:design-systems": "node --import tsx --conditions react-server scripts/design-systems-qa.mjs",
-    "test:site": "node --import tsx --conditions react-server scripts/site-qa.mjs"
+    "test:site": "node --import tsx --conditions react-server scripts/site-qa.mjs",
+    "test:preview": "node --import tsx --conditions react-server scripts/preview-qa.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.21.0",

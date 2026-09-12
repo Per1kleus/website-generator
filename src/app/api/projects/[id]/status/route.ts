@@ -22,6 +22,12 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
     // screen only for a Digital Menu project.
     name: project.business_name,
     kind: project.site_kind,
+    // Enough for the progress screen to show the finished website the instant
+    // the job reports done, without a round trip through a page reload.
+    // Null until there is a document to preview.
+    site: project.site
+      ? { locales: project.site.meta.locales, defaultLocale: project.site.meta.defaultLocale }
+      : null,
     job: getLatestJob(id),
   });
 }

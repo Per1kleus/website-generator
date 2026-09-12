@@ -215,20 +215,31 @@ heading too big for a small screen, an empty section, text that's hard to read
 **Visual check**, with the exact thing to do. It never rewrites your words to
 make a check pass.
 
-When it's done you'll see **Your website is ready**.
+When it's done, **your website appears right there on the screen.** You don't
+need to find a file, open another browser, or start anything — the finished
+site loads into a live preview inside the app.
+
+Above it are buttons for **Desktop**, **Tablet**, **Mobile** and **320px**.
+These really do resize the website, so what you see is what someone on that
+device will see. They're part of the app, not part of your website — visitors
+never see them.
 
 Sometimes it will ask you **a few questions about the design** — only when a
 real choice couldn't be worked out from what you gave it. Answer them, or don't.
 
 ### Step 4 — Look at it
 
-Click **Preview** in the sidebar. You can view it at phone, tablet and desktop
-widths.
+The website is already on screen when generation finishes, and it's on your
+project screen too. Click **Preview** in the sidebar for a full-screen view.
+
+Everything works the way it will for a visitor: the menu, the links, the
+language switcher. If you have two languages, the switcher inside the website
+is your website's own — the buttons above it are the app's.
 
 ### Step 5 — Change it
 
 - **Content** — your sections listed on the left, the live website on the
-  right. Click a section to edit its words. Drag the handle, or use **Move up**
+  right, updating each time you save. Click a section to edit its words. Drag the handle, or use **Move up**
   and **Move down**, to reorder. Hide a section you don't want.
 - **Ask AI to edit** — the button under the section list. Type what you want in
   ordinary words: *"make the tagline warmer"*, *"add a section about
