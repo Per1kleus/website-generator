@@ -8,10 +8,22 @@ import { IconLayers, IconTrash } from "./icons";
 import type { Version } from "@/server/projects";
 
 /**
- * Project versions (requirement 12 / "manage project versions").
- * Save a snapshot, restore one, or remove it — all from a phone, with
- * confirmation for the two destructive actions.
+ * Project versions.
+ *
+ * Every saved state of the website, numbered in the order it happened, with
+ * the one the project is currently showing marked. Restoring an earlier state
+ * does not rewind history — it adds the old document to the front as a new
+ * version — so a rollback is itself something you can roll back, and nothing a
+ * person did is ever silently lost.
  */
+
+const KIND_LABEL: Record<string, string> = {
+  generated: "Generated",
+  manual: "Edited",
+  correction: "Corrected automatically",
+  restore: "Restored",
+};
+
 export function VersionList({
   projectId,
   businessName,
@@ -78,15 +90,38 @@ export function VersionList({
         <ul className="space-y-2.5">
           {versions.map((v) => (
             <li key={v.id}>
-              <Card>
-                <p className="font-semibold">{v.label}</p>
-                <p className="mt-0.5 text-xs text-muted">
-                  {new Date(v.created_at).toLocaleString()}
-                </p>
+              <Card className={v.current ? "border-brand" : ""}>
+                <div className="flex items-start gap-2">
+                  <span
+                    aria-hidden="true"
+                    className="shrink-0 rounded-lg bg-elevated px-2 py-1 text-xs font-bold tabular-nums text-muted"
+                  >
+                    V{v.number}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="font-semibold">
+                      <span className="sr-only">Version {v.number}: </span>
+                      {v.label}
+                    </p>
+                    <p className="mt-0.5 text-xs text-muted">
+                      {KIND_LABEL[v.kind] ?? "Saved"} ·{" "}
+                      {new Date(v.created_at).toLocaleString()}
+                    </p>
+                  </div>
+                  {v.current && (
+                    <span
+                      data-version-current
+                      className="shrink-0 rounded-full bg-brand-soft px-2.5 py-1 text-xs font-bold text-brand"
+                    >
+                      Current
+                    </span>
+                  )}
+                </div>
                 <div className="mt-3 flex gap-2">
                   <Button
                     variant="secondary"
                     className="flex-1"
+                    disabled={v.current}
                     onClick={() => setConfirm({ action: "restore", version: v })}
                   >
                     Restore
@@ -177,10 +212,10 @@ export function VersionList({
           </div>
         }
       >
-        <p className="pb-2 text-sm text-muted">
+        <p className="pb-2 text-sm text-muted" data-version-confirm>
           {confirm?.action === "restore"
-            ? `Your current website will be saved first, so you can undo this.`
-            : `“${confirm?.version.label}” will be removed permanently.`}
+            ? `Version ${confirm.version.number} becomes your website again, added to the front of this list as a new version. Nothing is deleted — the version you have now stays exactly where it is, so you can come straight back to it.`
+            : `“${confirm?.version.label}” will be removed permanently. Your website is not changed.`}
         </p>
       </BottomSheet>
 

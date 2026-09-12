@@ -7,6 +7,7 @@ import { SectionSheet } from "./SectionSheet";
 import { AiSheet } from "./AiSheet";
 import { LocaleTabs } from "./LocaleTabs";
 import { SitePreview, type PreviewHandle } from "./SitePreview";
+import { SeoFields } from "./SeoFields";
 import { IconDown, IconDrag, IconEye, IconEyeOff, IconPencil, IconSparkles, IconUp } from "./icons";
 import { localeInfo, type Locale } from "@/lib/locales";
 import {
@@ -200,6 +201,16 @@ export function SectionEditor({
           {localeInfo(site.meta.defaultLocale).english} on the live site.
         </Banner>
       )}
+
+      {/* Typing updates the document in place; leaving the field saves it. */}
+      <SeoFields
+        site={site}
+        locale={locale}
+        onChange={applyLocal}
+        onCommit={() => {
+          if (dirty) void persist(site, "Search listing saved");
+        }}
+      />
 
       <p className="my-3 text-sm text-muted">
         Select a section to edit it. Drag the handle, or use the arrows, to reorder.

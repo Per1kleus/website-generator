@@ -1,9 +1,14 @@
 import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/server/auth";
-import { listProjects } from "@/server/projects";
+import { listAssets, listProjects } from "@/server/projects";
+import { getLatestDeployment } from "@/server/deploy";
+import { assessReadiness } from "@/lib/checklist";
+import { projectState } from "@/lib/project-status";
+import { renderSite } from "@/lib/render";
 import { AppShell } from "@/components/AppShell";
 import { AppBar, Card, LinkButton } from "@/components/ui";
-import { ProjectCard } from "@/components/ProjectCard";
+import { ProjectFilter } from "@/components/ProjectFilter";
+import type { ProjectSummary } from "@/components/ProjectCard";
 
 export default async function DashboardPage() {
   const user = await getCurrentUser();
@@ -11,6 +16,38 @@ export default async function DashboardPage() {
 
   const projects = listProjects(user.id);
   const firstName = user.name.split(" ")[0];
+
+  // One readiness pass per project, computed here so the list shows the same
+  // number the project screen does. Rendering and auditing are string work
+  // over a document already in memory — no network, no model, no image decode.
+  const summaries: Record<string, ProjectSummary> = {};
+  for (const project of projects) {
+    const deployment = getLatestDeployment(project.id);
+    const readiness = project.site
+      ? assessReadiness({
+          site: project.site,
+          locale: project.site.meta.defaultLocale,
+          html: renderSite(project.site, { locale: project.site.meta.defaultLocale }),
+          images: Object.fromEntries(
+            listAssets(project.id).map((a) => [
+              a.id,
+              { width: a.width, height: a.height, bytes: a.bytes },
+            ]),
+          ),
+        })
+      : null;
+    summaries[project.id] = {
+      state: projectState({
+        status: project.status,
+        hasSite: Boolean(project.site),
+        readiness,
+        deploymentStatus: deployment?.status ?? null,
+      }),
+      score: readiness?.score ?? null,
+      criticals: readiness?.issues.filter((i) => i.severity === "critical").length ?? 0,
+      publishedUrl: deployment?.status === "live" ? deployment.url : null,
+    };
+  }
 
   return (
     <AppShell wide>
@@ -40,15 +77,9 @@ export default async function DashboardPage() {
         </div>
       ) : (
         <>
-          {/* A workspace grid: as many columns as the window genuinely has
-              room for, down to one when it is narrow. */}
-          <ul className="mt-2 grid grid-cols-1 gap-3 md:grid-cols-2 2xl:grid-cols-3">
-            {projects.map((p) => (
-              <li key={p.id}>
-                <ProjectCard project={p} />
-              </li>
-            ))}
-          </ul>
+          {/* Search, status chips, and a workspace grid: as many columns as
+              the window genuinely has room for, down to one when narrow. */}
+          <ProjectFilter projects={projects} summaries={summaries} />
 
           <Card className="mt-4 max-w-md border-dashed text-center">
             <p className="text-sm text-muted">Got another business?</p>

@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/server/auth";
 import {
-  deleteVersion, getProject, getVersionSite, listVersions,
-  saveVersion, updateProjectSite,
+  deleteVersion, getProject, listVersions, restoreVersion, saveVersion,
 } from "@/server/projects";
 
 export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }) {
@@ -24,12 +23,12 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   const body = (await req.json()) as { action?: string; label?: string; versionId?: string };
 
   if (body.action === "restore" && body.versionId) {
-    const site = getVersionSite(body.versionId, id);
-    if (!site) return NextResponse.json({ error: "Version not found." }, { status: 404 });
-    // Snapshot what we are about to replace, so restoring is itself reversible.
-    saveVersion(id, "Before restore", project.site);
-    updateProjectSite(id, user.id, site);
-    return NextResponse.json({ ok: true, site });
+    // The restored document arrives as a new version at the front of history.
+    // Nothing earlier is removed and nothing later is discarded, so undoing a
+    // rollback is just another rollback.
+    const restored = restoreVersion(id, user.id, body.versionId);
+    if (!restored) return NextResponse.json({ error: "Version not found." }, { status: 404 });
+    return NextResponse.json({ ok: true, site: restored.site, version: restored.version });
   }
 
   if (body.action === "delete" && body.versionId) {

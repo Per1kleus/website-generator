@@ -345,6 +345,36 @@ and cannot reach this application's cookies, DOM or API. `docs/PREVIEW.md` has
 the details, including the two URL differences between preview and published
 output and how they are tested.
 
+### Knowing whether it is ready to send
+
+Two more deterministic scores, both this application's own and both labelled
+as such — neither is a Lighthouse result.
+
+**Client readiness** (`lib/checklist.ts`) is 100 points across seven weighted
+categories: rendering and functionality (25), mobile and responsive (20), SEO
+(15), content integrity (15), images (10), accessibility (10), performance
+(5). It answers the question visual QA does not — *can I send this to the
+client?* — and it reuses rather than re-decides: visual QA's verdict at the
+four widths, `lib/seo.ts` for metadata, `site.images` for photographs. Every
+point taken off is attached to a finding that names what and why, and the
+project screen shows them category by category.
+
+A critical failure overrides the number. A site scoring 96 that gives a
+visitor no way to contact the business reads NOT READY, with the reason
+printed underneath. That rule is what makes the score worth trusting.
+
+It never edits anything: placeholder copy is reported and left exactly where
+it is. Changing a business's own words to score better would be worthless.
+
+**Performance** (`lib/performance.ts`) measures six things the application can
+actually see — per-image bytes against a per-role budget, page weight, the
+hero preload and blocking resources, width/height and aspect ratios, font
+weights against the weights the tokens set, and the size of the generated code
+— and the renderer acts on two of them: the hero image is preloaded, and only
+the font weights the design uses are requested.
+
+`docs/READINESS.md` has the full scoring table and the severity rules.
+
 ### Contrast is guaranteed, not assumed
 
 A palette can arrive from a hosted model, the catalogue, or a colour picker,
@@ -564,7 +594,17 @@ npm run test:gemini     # 49 checks: the hosted model, its contracts and failure
 npm run test:design-systems  # 59 checks: layout, tokens, heuristics, critic
 npm run test:site       # 198 checks: visual QA, SEO and image intelligence
 npm run test:preview    # 60 checks: the integrated live preview
+npm run test:studio     # 157 checks: editing, versions, projects, performance, readiness
 ```
+
+`test:studio` covers the five studio systems against the things they claim.
+It asserts that an edit does not start a generation job — "it did not
+regenerate" is a claim about what the server did, not about how the save felt
+— that restoring an old version leaves every later version in place and adds
+the restored document to the front, that a critical failure outranks a high
+score, and that a business with no photographs is scored as a legitimate
+outcome rather than a fault. It finishes by taking the same six businesses
+through generation, correction, readiness and performance.
 
 `test:preview` generates a real website and then holds the preview to its one
 promise — that it *is* the website. It runs the publisher (`buildBundle`) over

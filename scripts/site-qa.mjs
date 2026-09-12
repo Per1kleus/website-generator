@@ -656,8 +656,13 @@ async function cornerImage(file, corner, width = 1600, height = 1000) {
     (html.match(/<img[^>]*wide[^>]*>/) ?? ["not found"])[0].slice(0, 160));
   record("the focal point becomes an object-position",
     /object-position:20\.0% 30\.0%/.test(html));
+  // Counted over <img> tags only: the hero's preload hint in the head carries
+  // the same attribute and refers to the same picture, so counting every
+  // occurrence would read one prioritised image as two.
   record("the hero image is the only priority image",
-    (html.match(/fetchpriority="high"/g) ?? []).length === 1);
+    [...html.matchAll(/<img\b[^>]*>/g)].filter((m) => /fetchpriority="high"/.test(m[0])).length === 1);
+  record("...and the hero's preload hint points at that same image",
+    /<link rel="preload" as="image" href="\/uploads\/wide\.webp"/.test(html));
   record("gallery images are lazy", /loading="lazy"/.test(html));
   const bare = [...html.replace(/<style\b[^>]*>[\s\S]*?<\/style>/g, "").matchAll(/<img\b[^>]*>/g)]
     .map((m) => m[0])

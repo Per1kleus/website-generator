@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/server/auth";
-import { getProject, listAssets, updateProjectSite } from "@/server/projects";
+import { getProject, listAssets, recordEdit, updateProjectSite } from "@/server/projects";
 import { syncPlacements } from "@/server/images";
 import { validateSiteDoc } from "@/server/ai-edit";
 import { validateSite } from "@/server/validate";
@@ -25,7 +25,7 @@ export async function PUT(req: Request, ctx: { params: Promise<{ id: string }> }
   const project = getProject(id, user.id);
   if (!project?.site) return NextResponse.json({ error: "Not found." }, { status: 404 });
 
-  const body = (await req.json()) as { site: Site };
+  const body = (await req.json()) as { site: Site; label?: string };
   if (!body?.site) return NextResponse.json({ error: "No site provided." }, { status: 400 });
 
   // Run the same validation the AI path uses: anything malformed falls back to
@@ -34,6 +34,9 @@ export async function PUT(req: Request, ctx: { params: Promise<{ id: string }> }
   // for every picture it now shows.
   const site = syncPlacements(validateSiteDoc(body.site, project.site), listAssets(id));
   updateProjectSite(id, user.id, site);
+  // Every manual edit is recoverable, without one version per keystroke: a
+  // run of edits in the same sitting updates one version in place.
+  recordEdit(id, (body.label ?? "").trim() || "Edited", site);
 
   return NextResponse.json({ ok: true, site, warnings: validateSite(site).map((f) => f.message) });
 }

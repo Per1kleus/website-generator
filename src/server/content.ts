@@ -405,6 +405,20 @@ export function assembleSite(args: {
     sections.push({ id, type: "footer", visible: true, links: [] });
   }
 
+  // "#contact" is written before the sections have ids, as the fallback for a
+  // business that gave neither a phone number nor an email. Resolve it now
+  // that the ids exist: left as a literal it is a button that scrolls
+  // nowhere, which is the worst kind of broken — it looks fine until tapped.
+  const contactId = sections.find((s) => s.type === "contact")?.id;
+  const resolved = contactId ? `#${contactId}` : "#main";
+  for (const section of sections) {
+    if (section.type === "hero") {
+      if (section.ctaHref === "#contact") section.ctaHref = resolved;
+      if (section.secondaryHref === "#contact") section.secondaryHref = resolved;
+    }
+    if (section.type === "cta" && section.ctaHref === "#contact") section.ctaHref = resolved;
+  }
+
   return {
     version: 2,
     meta: {
@@ -416,7 +430,7 @@ export function assembleSite(args: {
       stickyCta: {
         // A menu never gets a sticky bar: nothing may cover the prices.
         enabled: args.kind !== "menu",
-        href: primaryHref,
+        href: primaryHref === "#contact" ? resolved : primaryHref,
       },
     },
     theme: args.theme,

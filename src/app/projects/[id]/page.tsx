@@ -11,6 +11,8 @@ import { DesignQuestions, type DesignQuestion } from "@/components/DesignQuestio
 import { MenuDataCard } from "@/components/MenuDataCard";
 import { VisualQaCard } from "@/components/VisualQaCard";
 import { SitePreview } from "@/components/SitePreview";
+import { ReadinessCard } from "@/components/ReadinessCard";
+import { ProjectOverview, type Figure } from "@/components/ProjectOverview";
 import { getMenuSource } from "@/server/menu/source";
 import { AppBar, Banner, Card, LinkButton } from "@/components/ui";
 import {
@@ -18,7 +20,10 @@ import {
   IconPencil, IconRocket, IconSettings, IconSheet,
 } from "@/components/icons";
 import { SITE_KINDS } from "@/lib/site";
-import { auditSite } from "@/lib/visual-qa";
+import { assessReadiness } from "@/lib/checklist";
+import { projectState, stateInfo } from "@/lib/project-status";
+import { renderSite } from "@/lib/render";
+import { getLatestDeployment } from "@/server/deploy";
 
 export async function generateMetadata({
   params,
@@ -56,17 +61,31 @@ export default async function ProjectPage({
     questions?: DesignQuestion[];
     qa?: { applied?: { id: string; what: string }[] };
   } | null;
-  // Re-audited live rather than read from the generation record: the creator
-  // has been editing since, and a stale verdict is worse than none.
-  const qa = project.site
-    ? auditSite({
+  // Assessed live rather than read from the generation record: the creator has
+  // been editing since, and a stale verdict is worse than none. The readiness
+  // report carries the visual QA audit inside it, so the page renders the site
+  // once and audits it once.
+  const imageSizes = Object.fromEntries(
+    assets.map((a) => [a.id, { width: a.width, height: a.height, bytes: a.bytes }]),
+  );
+  const readiness = project.site
+    ? assessReadiness({
         site: project.site,
         locale: project.site.meta.defaultLocale,
-        images: Object.fromEntries(
-          assets.map((a) => [a.id, { width: a.width, height: a.height, bytes: a.bytes }]),
-        ),
+        html: renderSite(project.site, { locale: project.site.meta.defaultLocale }),
+        images: imageSizes,
       })
     : null;
+  const qa = readiness?.qa ?? null;
+  const deployment = getLatestDeployment(id);
+  const state = stateInfo(
+    projectState({
+      status: project.status,
+      hasSite: Boolean(project.site),
+      readiness,
+      deploymentStatus: deployment?.status ?? null,
+    }),
+  );
   const questions = (identity?.questions ?? []).filter((q) => q?.question && q.options?.length);
   const errors = findings.filter((f) => f.level === "error");
   const warnings = findings.filter((f) => f.level === "warning");
@@ -91,9 +110,50 @@ export default async function ProjectPage({
     { href: `/projects/${id}/settings`, label: "Settings", hint: "Business details", Icon: IconSettings },
   ];
 
+  // Each figure is read from the system that owns it, never recomputed here.
+  const seoIssues = readiness?.categories.find((c) => c.id === "seo");
+  const figures: Figure[] = readiness
+    ? [
+        {
+          label: "Readiness",
+          value: `${readiness.score}/100`,
+          tone: readiness.status === "READY" ? "good" : readiness.status === "NOT READY" ? "bad" : "warn",
+        },
+        {
+          label: "Layout QA",
+          value: `${readiness.qa.score}/100`,
+          tone: readiness.qa.score >= 90 ? "good" : readiness.qa.score >= 70 ? "warn" : "bad",
+        },
+        {
+          label: "SEO",
+          value: seoIssues?.verdict === "PASS" ? "Passed" : `${seoIssues?.score ?? 0}/15`,
+          tone: seoIssues?.verdict === "PASS" ? "good" : seoIssues?.verdict === "FAIL" ? "bad" : "warn",
+        },
+        {
+          label: "Performance",
+          value: `${readiness.performance.score}/100`,
+          tone:
+            readiness.performance.score >= 90
+              ? "good"
+              : readiness.performance.score >= 70
+                ? "warn"
+                : "bad",
+        },
+      ]
+    : [];
+
   return (
     <AppShell>
       <AppBar title={project.business_name} subtitle={kind?.label} back="/" />
+
+      {project.site && (
+        <ProjectOverview
+          state={state}
+          figures={figures}
+          updatedAt={project.updated_at}
+          publishedUrl={deployment?.status === "live" ? deployment.url : null}
+        />
+      )}
 
       {project.status === "failed" && (
         <Banner tone="error">
@@ -143,6 +203,8 @@ export default async function ProjectPage({
           {isMenuProject && <MenuDataCard projectId={id} source={menuSource} />}
 
           <DesignQuestions projectId={id} questions={questions} />
+
+          {readiness && <ReadinessCard report={readiness} projectId={id} />}
 
           {qa && <VisualQaCard report={qa} corrections={identity?.qa?.applied ?? []} />}
 

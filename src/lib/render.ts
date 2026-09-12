@@ -78,11 +78,64 @@ function fontLinks(site: Site): string {
   const url = site.theme.fontFamilies?.url?.trim();
   if (!url) return "";
   if (!/^https:\/\/fonts\.googleapis\.com\//.test(url)) return "";
-  const withSwap = url.includes("display=") ? url : `${url}${url.includes("?") ? "&" : "?"}display=swap`;
+  const trimmed = trimFontWeights(url, site);
+  const withSwap = trimmed.includes("display=")
+    ? trimmed
+    : `${trimmed}${trimmed.includes("?") ? "&" : "?"}display=swap`;
   return `<link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="${esc(withSwap)}" media="print" onload="this.media='all'">
 <noscript><link rel="stylesheet" href="${esc(withSwap)}"></noscript>`;
+}
+
+/**
+ * Ask Google only for the weights this design actually sets.
+ *
+ * The catalogue hands over a family URL with every weight the family offers,
+ * which is a font file each — on a phone that is real bytes for glyphs no rule
+ * ever references. The token engine names exactly two weights, and the
+ * stylesheet below uses nothing else, so the rest can go.
+ *
+ * Conservative by construction: it only rewrites the standard `wght@a;b;c`
+ * form, only ever removes, and leaves the URL exactly as it found it if the
+ * result would be empty or the shape is unfamiliar. Removing a weight the
+ * design uses would be worse than shipping one it does not.
+ */
+function trimFontWeights(url: string, site: Site): string {
+  const tokens = site.theme.tokens;
+  if (!tokens) return url;
+  if (!/wght@[\d;,.]+/.test(url)) return url;
+
+  const wanted = new Set([tokens.type.headingWeight, tokens.type.bodyWeight, 400]);
+
+  return url.replace(/wght@([\d;,.]+)/g, (whole, list: string) => {
+    const offered = list.split(";").filter(Boolean);
+    // Italics and other axes come through as "0,400;1,400" — a shape this is
+    // not confident about, so it is left alone.
+    if (offered.some((w) => w.includes(","))) return whole;
+
+    const kept = offered.filter((w) => wanted.has(Number(w)));
+    // Nothing recognised means the assumption is wrong somewhere; keep them all.
+    if (!kept.length) return whole;
+    return `wght@${kept.join(";")}`;
+  });
+}
+
+/**
+ * Tell the browser about the one image that decides how fast the page feels.
+ *
+ * The hero is discovered late — it is an `<img>` deep in the body, behind the
+ * stylesheet — and it is almost always the largest contentful paint. One
+ * preload hint in the head starts it in parallel with the CSS instead of after
+ * it. Only ever the hero: preloading more would make them compete, which is
+ * the problem this is meant to solve.
+ */
+function heroPreload(site: Site, opts: RenderOptions): string {
+  const hero = site.images?.find((p) => p.role === "hero" && p.priority);
+  if (!hero) return "";
+  const url = imageUrl(hero.assetId, opts);
+  if (!url) return "";
+  return `<link rel="preload" as="image" href="${esc(url)}" fetchpriority="high">`;
 }
 
 /* ------------------------------------------------------------------ CSS -- */
@@ -1007,6 +1060,7 @@ ${languageSwitcher(site, locale, opts, "inline")}
 ${description ? `<meta name="description" content="${esc(description)}">` : ""}
 ${seo?.keywords?.length ? `<meta name="keywords" content="${esc(seo.keywords.join(", "))}">` : ""}
 <meta name="theme-color" content="${esc(site.theme.colors.primary)}">
+${heroPreload(site, opts)}
 ${fontLinks(site)}
 <meta name="robots" content="index, follow">
 ${opts.canonical ? `<link rel="canonical" href="${esc(opts.canonical)}">` : ""}

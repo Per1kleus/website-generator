@@ -180,6 +180,11 @@ const COLUMNS: [table: string, column: string, ddl: string][] = [
   // never has to decode the picture again. 0.5/0.5 means "not measured".
   ["assets", "focal_x", "REAL NOT NULL DEFAULT 0.5"],
   ["assets", "focal_y", "REAL NOT NULL DEFAULT 0.5"],
+  // Why a version exists, so history reads as a story rather than a pile of
+  // timestamps. Existing rows predate the distinction and are "manual".
+  ["versions", "kind", "TEXT NOT NULL DEFAULT 'manual'"],
+  // The version this one restored, when it was made by a rollback.
+  ["versions", "restored_from", "TEXT NOT NULL DEFAULT ''"],
 ];
 
 function addColumns(handle: Database.Database) {

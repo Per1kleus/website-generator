@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { GENERATION_STEPS, type Site } from "@/lib/site";
 import { db } from "./db";
 import { runGeneration, type GenerationInput } from "./generator";
-import { listAssets } from "./projects";
+import { listAssets, saveVersion } from "./projects";
 import { validateSite, type Finding } from "./validate";
 
 /**
@@ -180,9 +180,9 @@ async function run(jobId: string, projectId: string, input: GenerationInput) {
       now,
       projectId,
     );
-    db.prepare(
-      "INSERT INTO versions (id, project_id, label, site, created_at) VALUES (?, ?, ?, ?, ?)",
-    ).run(randomUUID(), projectId, "Generated", JSON.stringify(site), now);
+    // The first fixed point in the project's history, and the one a rollback
+    // always has to fall back to.
+    saveVersion(projectId, "Initial generation", site, "generated");
 
     const job = getJob(jobId);
     writeJob(jobId, {

@@ -3,6 +3,7 @@ import { ARCHITECTURE_IDS, architecture } from "@/lib/architectures";
 import { isSupportedLocale, LOCALES, localeInfo, type Locale } from "@/lib/locales";
 import { emptyCatalog, key, newId, type Section, type Site } from "@/lib/site";
 import { PALETTES } from "@/lib/styles";
+import { tokensForArchitecture } from "@/lib/tokens";
 import { contrastRatio } from "./identity";
 import { hasApiKey } from "./research";
 import { describeError, generateText } from "./gemini";
@@ -343,6 +344,24 @@ export function validateSiteDoc(candidate: Site, previous: Site): Site {
     };
   }
 
+  const architectureId = ARCHITECTURE_IDS.includes(candidate.theme?.architecture)
+    ? candidate.theme.architecture
+    : previous.theme.architecture;
+
+  /**
+   * The derived design system, kept coherent across an edit.
+   *
+   * Tokens are not hand-edited — they are what the token engine worked out
+   * from the architecture and the business. So an edit carries them through
+   * unchanged, and the one case that must not carry through is a change of
+   * architecture: leaving a luxury hotel's spacing on a brutalist page would
+   * be a design system in name only. That case re-derives.
+   */
+  const tokens =
+    architectureId === previous.theme.architecture
+      ? (previous.theme.tokens ?? candidate.theme?.tokens)
+      : tokensForArchitecture(architectureId, previous.meta.kind);
+
   return {
     version: 2,
     meta: {
@@ -355,9 +374,13 @@ export function validateSiteDoc(candidate: Site, previous: Site): Site {
         enabled: Boolean(candidate.meta?.stickyCta?.enabled ?? previous.meta.stickyCta.enabled),
         href: candidate.meta?.stickyCta?.href ?? previous.meta.stickyCta.href,
       },
+      // What the research verified is not something an edit may invent or
+      // lose: the structured data on the published page depends on it.
+      ...(previous.meta.facts ? { facts: previous.meta.facts } : {}),
     },
     theme: {
       colors,
+      ...(tokens ? { tokens } : {}),
       // Web fonts are chosen by the design-intelligence stage, not by a free
       // -form edit; carrying them through keeps typography stable.
       fontFamilies: previous.theme.fontFamilies,
@@ -378,11 +401,12 @@ export function validateSiteDoc(candidate: Site, previous: Site): Site {
         candidate.theme.radius <= 60
           ? candidate.theme.radius
           : previous.theme.radius,
-      architecture: ARCHITECTURE_IDS.includes(candidate.theme?.architecture)
-        ? candidate.theme.architecture
-        : previous.theme.architecture,
+      architecture: architectureId,
     },
     sections: clean.length ? clean : previous.sections,
+    // Placements are re-derived from the assets table on save; carrying them
+    // means an edit that touches no image does not lose its crops meanwhile.
+    ...(previous.images ? { images: previous.images } : {}),
     i18n,
   };
 }

@@ -319,8 +319,13 @@ try {
 
   const priceOf = (doc) => (doc.match(/<span class="price">([^<]*)<\/span>/g) ?? []).join("|");
   record("prices are identical in both languages", priceOf(page) === priceOf(el.text));
-  const imgOf = (doc) => (doc.match(/menu-thumb"><img src="([^"]+)"/g) ?? []).join("|");
-  record("images are identical in both languages", imgOf(page) === imgOf(el.text));
+  // Compared by asset, not by URL: a preview URL carries a capability token
+  // whose window can roll over between two renders. The property under test is
+  // that both languages show the same photographs, in the same order.
+  const imgOf = (doc) =>
+    [...doc.matchAll(/menu-thumb"><img src="([^"?]+)/g)].map((m) => m[1]).join("|");
+  record("images are identical in both languages", imgOf(page) === imgOf(el.text),
+    `${imgOf(page)} vs ${imgOf(el.text)}`);
   record("chef's choice status is identical in both languages",
     (page.match(/class="chefs"/g) ?? []).length === (el.text.match(/class="chefs"/g) ?? []).length);
 

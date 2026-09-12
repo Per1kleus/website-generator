@@ -219,22 +219,71 @@ export function deleteProject(id: string, userId: string): void {
 
 /* ------------------------------- versions ------------------------------- */
 
-export type Version = { id: string; project_id: string; label: string; created_at: number };
+/**
+ * Why a saved state exists.
+ *
+ * The distinction matters because history is only useful if a person can read
+ * it. "Generated", "Edited" and "Restored" are three different kinds of event,
+ * and an automatic correction is a fourth — worth recording, but not worth
+ * presenting as though the creator did it.
+ */
+export type VersionKind = "generated" | "manual" | "correction" | "restore";
 
+export type Version = {
+  id: string;
+  project_id: string;
+  label: string;
+  kind: VersionKind;
+  /** The version this one restored, when it came from a rollback. */
+  restored_from: string;
+  created_at: number;
+  /** 1-based, in the order they were created. Assigned on read. */
+  number: number;
+  /** True for the state the project is currently showing. */
+  current: boolean;
+};
+
+type VersionRow = Omit<Version, "number" | "current">;
+
+/**
+ * Every saved state, newest first, numbered oldest-first.
+ *
+ * The numbers are derived rather than stored: they are a property of the
+ * order, and storing them would mean two sources of truth for the same fact.
+ * The newest version is the current one, because every write path here saves
+ * the state it is about to make live.
+ */
 export function listVersions(projectId: string): Version[] {
-  return db
+  const rows = db
     .prepare(
-      "SELECT id, project_id, label, created_at FROM versions WHERE project_id = ? ORDER BY created_at DESC",
+      `SELECT id, project_id, label, kind, restored_from, created_at
+         FROM versions WHERE project_id = ? ORDER BY created_at ASC, rowid ASC`,
     )
-    .all(projectId) as Version[];
+    .all(projectId) as VersionRow[];
+
+  const last = rows.length - 1;
+  return rows
+    .map((row, index) => ({ ...row, number: index + 1, current: index === last }))
+    .reverse();
 }
 
-export function saveVersion(projectId: string, label: string, site: Site): string {
+export function saveVersion(
+  projectId: string,
+  label: string,
+  site: Site,
+  kind: VersionKind = "manual",
+  restoredFrom = "",
+): string {
   const id = randomUUID();
   db.prepare(
-    "INSERT INTO versions (id, project_id, label, site, created_at) VALUES (?, ?, ?, ?, ?)",
-  ).run(id, projectId, label, JSON.stringify(site), Date.now());
+    `INSERT INTO versions (id, project_id, label, site, created_at, kind, restored_from)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  ).run(id, projectId, label, JSON.stringify(site), Date.now(), kind, restoredFrom);
   return id;
+}
+
+export function getVersion(versionId: string, projectId: string): Version | null {
+  return listVersions(projectId).find((v) => v.id === versionId) ?? null;
 }
 
 export function getVersionSite(versionId: string, projectId: string): Site | null {
@@ -242,6 +291,78 @@ export function getVersionSite(versionId: string, projectId: string): Site | nul
     .prepare("SELECT site FROM versions WHERE id = ? AND project_id = ?")
     .get(versionId, projectId) as { site: string } | undefined;
   return row ? (JSON.parse(row.site) as Site) : null;
+}
+
+/**
+ * Roll back to an earlier state.
+ *
+ * Nothing is deleted and nothing is overwritten. The earlier document is saved
+ * again as a *new* version at the front of history, which is what makes a
+ * rollback itself reversible: undoing it is another rollback, to the version
+ * that was current a moment ago.
+ *
+ *   V1  V2  V3 ←current        restore V1        V1  V2  V3  V4 ←current
+ *                                                            (a copy of V1)
+ */
+export function restoreVersion(
+  projectId: string,
+  userId: string,
+  versionId: string,
+): { site: Site; version: Version } | null {
+  const target = getVersion(versionId, projectId);
+  const site = getVersionSite(versionId, projectId);
+  if (!target || !site) return null;
+
+  const id = saveVersion(
+    projectId,
+    `Restored version ${target.number}${target.label ? ` — ${target.label}` : ""}`,
+    site,
+    "restore",
+    versionId,
+  );
+  updateProjectSite(projectId, userId, site);
+
+  const created = getVersion(id, projectId);
+  return created ? { site, version: created } : null;
+}
+
+/** How long a run of edits is treated as one sitting. */
+const EDIT_COALESCE_MS = 1000 * 60 * 2;
+
+/**
+ * Record a manual edit, folding a burst of them into one version.
+ *
+ * Editing a page is not one action, it is twenty: rename a heading, move a
+ * section, fix a phone number, hide a gallery. Saving each as its own version
+ * would produce a history nobody can read and bury the states that matter. So
+ * consecutive manual edits within a couple of minutes update the same version
+ * in place, and the moment anything else happens — a generation, a
+ * correction, a rollback — the next edit starts a fresh one.
+ *
+ * Generated, corrected and restored states are never folded into: those are
+ * the fixed points a person navigates by.
+ */
+export function recordEdit(projectId: string, label: string, site: Site): string | null {
+  const latest = listVersions(projectId)[0];
+  const serialised = JSON.stringify(site);
+
+  if (latest) {
+    const previous = getVersionSite(latest.id, projectId);
+    // Nothing actually changed — a save that rewrote the same document.
+    if (previous && JSON.stringify(previous) === serialised) return null;
+
+    if (latest.kind === "manual" && Date.now() - latest.created_at < EDIT_COALESCE_MS) {
+      db.prepare("UPDATE versions SET site = ?, label = ?, created_at = ? WHERE id = ?").run(
+        serialised,
+        label,
+        Date.now(),
+        latest.id,
+      );
+      return latest.id;
+    }
+  }
+
+  return saveVersion(projectId, label, site, "manual");
 }
 
 export function deleteVersion(versionId: string, projectId: string): void {

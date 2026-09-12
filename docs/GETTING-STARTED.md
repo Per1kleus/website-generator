@@ -249,8 +249,25 @@ is your website's own — the buttons above it are the app's.
 - **Media** — upload photos; they're optimised for you.
 - **Languages** — add or remove a language after generating. Adding one
   translates the text and provably leaves the design and prices alone.
-- **Versions** — save a snapshot before a big change, and restore it later if
-  you prefer the old one.
+- **Versions** — every saved state of the website, numbered, with the one
+  you are looking at marked **Current**. Restoring an older one does not
+  throw anything away: the old version comes back as a *new* version at the
+  top of the list, so you can go straight back again if you change your mind.
+
+### Is it ready to send?
+
+Your project screen shows a **Client readiness** score out of 100 — this app's
+own check, not a Google one — with seven parts: rendering, mobile, SEO,
+content, images, accessibility and speed. Click any part to see exactly what
+cost points and what to do about it.
+
+If something is genuinely wrong — no way to contact the business, a button
+that goes nowhere, placeholder text still on the page — it says **NOT READY**
+no matter how high the number is, and tells you why. A good score never hides
+a broken website.
+
+It never changes your words. If it finds placeholder text, it tells you; it
+does not write something else in its place.
 
 ### Step 6 — Publish it
 
