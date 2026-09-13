@@ -201,7 +201,7 @@ matters — some need you to start the application first.
 
 GROUP A — need NOTHING running. Just run them:
 
-    npm run test:site              (234 checks)
+    npm run test:site              (237 checks)
     npm run test:design-systems    (59 checks)
 
 GROUP B — start their own server automatically. Just run them:
@@ -245,18 +245,33 @@ KNOWN BROKEN COMMAND
 7. BUILDING THE WINDOWS APPLICATION
 --------------------------------------------------------------------------------
 
-You must be ON WINDOWS, with Rust and the Tauri v2 prerequisites installed
-(see section 1).
+ON WINDOWS, with Rust and the Tauri v2 prerequisites installed (see section 1):
 
     npm ci
     npm run build:windows
 
 The installer is written to:
 
-    desktop/tauri/src-tauri/target/release/bundle/nsis/
+    desktop/tauri/src-tauri/target/release/bundle/nsis/WebsiteGenerator-Setup.exe
 
 It installs for the current user, so it needs no administrator rights, and it
 carries its own Node runtime — whoever installs it needs nothing else.
+
+FROM LINUX OR macOS, the same installer can be cross-built. You need three
+extra things first:
+
+    rustup target add x86_64-pc-windows-msvc
+    cargo install --locked cargo-xwin
+    apt-get install nsis           (or your system's equivalent)
+
+    npm run build:windows:cross
+
+The first run of cargo-xwin downloads Microsoft's C runtime and Windows SDK,
+so the machine must be able to reach aka.ms and
+download.visualstudio.microsoft.com. The Node runtime that ships inside the
+installer is downloaded from nodejs.org for Windows and checked against that
+release's published SHASUMS256.txt — the building machine's own Node would be
+the wrong architecture.
 
 TO CHECK THE PACKAGING WITHOUT BUILDING AN INSTALLER
 

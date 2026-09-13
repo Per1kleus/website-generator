@@ -129,6 +129,20 @@ function researchPrompt(input: ResearchInput & { websiteUrl: string }): string {
 Research this business and return what you can verify. Leave anything you cannot verify empty.`;
 }
 
+/**
+ * A profile read back from storage, made safe to use.
+ *
+ * A project researched before the existing-website fields existed has a stored
+ * profile without them. Parsing it through the schema fills the defaults, so
+ * code downstream can read `websiteStyleNotes.length` without every reader
+ * having to know which version wrote the row — the same reason site documents
+ * are migrated on read rather than backfilled.
+ */
+export function readProfile(stored: unknown): BusinessProfile {
+  const parsed = BusinessProfileSchema.safeParse(stored);
+  return parsed.success ? parsed.data : emptyProfile();
+}
+
 /** Re-exported so the modules that already import it from here keep working. */
 export { hasApiKey };
 

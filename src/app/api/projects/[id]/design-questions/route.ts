@@ -5,7 +5,7 @@ import {
 } from "@/server/projects";
 import { db } from "@/server/db";
 import { analyseIdentity, themeFromIdentity, type VisualIdentity } from "@/server/identity";
-import { emptyProfile, type BusinessProfile } from "@/server/research";
+import { readProfile } from "@/server/research";
 import type { SiteKind } from "@/lib/site";
 
 /**
@@ -38,7 +38,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   setDesignAnswers(id, answers);
   saveVersion(id, "Before design refresh", project.site);
 
-  const profile = (project.businessProfile as BusinessProfile | null) ?? emptyProfile();
+  const profile = readProfile(project.businessProfile);
   const identity = await analyseIdentity({
     profile,
     businessName: project.business_name,

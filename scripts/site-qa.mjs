@@ -39,6 +39,7 @@ const {
 const { deriveTokens, readSignals, NEUTRAL_SIGNALS } = await import("../src/lib/tokens.ts");
 const { renderSite, renderSitemap, renderRobots } = await import("../src/lib/render.ts");
 const { checkWebsiteUrl, isUsableWebsiteUrl, websiteHost } = await import("../src/lib/website-url.ts");
+const { readProfile } = await import("../src/server/research.ts");
 
 const PRESET = "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
 const EXEC = process.env.PW_CHROME ?? (existsSync(PRESET) ? PRESET : undefined);
@@ -789,6 +790,26 @@ console.log("\n=== The existing website a creator can supply ===\n");
   record("an absent address counts as usable, because it is optional",
     isUsableWebsiteUrl("") === true && isUsableWebsiteUrl("https://example.com") === true);
   record("a broken address never counts as usable", isUsableWebsiteUrl("http://localhost") === false);
+
+  // A project researched before this feature existed has a stored profile with
+  // none of the website fields on it. Reading it back must produce a usable
+  // profile rather than throwing the first time something reads a list.
+  const old = {
+    name: "Fournos", category: "Bakery", cuisineOrSpecialty: "", location: "Athens",
+    address: "", phone: "", email: "", website: "", openingHours: [], priceRange: "",
+    rating: "", reviewThemes: [], services: [], menuHighlights: [], atmosphere: "",
+    targetAudience: "", positioning: "", verifiedFields: ["category"],
+    sources: ["https://example.com"], unknowns: [], confidence: "medium",
+  };
+  const read = readProfile(old);
+  record("a profile stored before the website fields existed still reads back",
+    read.name === "Fournos" && read.verifiedFields.includes("category"));
+  record("...with the new fields defaulted rather than missing",
+    Array.isArray(read.websiteStyleNotes) && read.websiteStyleNotes.length === 0 &&
+      Array.isArray(read.websiteFields) && read.websiteReachable === false);
+  record("a stored profile that is not a profile at all falls back to an empty one",
+    readProfile({ nonsense: true }).name === "" &&
+      Array.isArray(readProfile(null).websiteFields));
 
   record("the host is named without the www, for saying what could not be read",
     websiteHost("https://www.kafeneio.gr/menu") === "kafeneio.gr",

@@ -406,6 +406,17 @@ try {
     .filter((k) => packaging.includes(`${k}=`) || packaging.includes(`"${k}"`));
   record("no secret is named anywhere in the packaging", named.length === 0, named.join(", "));
 
+  // Projects, uploads and the database must survive an update, and must
+  // actually go when someone asks for them to go. Tauri's uninstaller offers
+  // to delete the local application data directory and nothing else, so the
+  // app has to keep its data in exactly that directory — anywhere else and
+  // "Delete the application data" quietly leaves all of it behind.
+  const shell = readFileSync(path.join(ROOT, "desktop/tauri/src-tauri/src/main.rs"), "utf8");
+  record("the app stores its data where the uninstaller offers to delete it",
+    shell.includes("app_local_data_dir()") && !shell.includes("app_data_dir()"));
+  record("...and never beside the executable",
+    !/data_dir\s*=\s*resources/.test(shell));
+
   // Only meaningful once something has been staged; skipped rather than
   // guessed at otherwise.
   const staged = path.join(ROOT, ".next", "standalone");

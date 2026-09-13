@@ -16,7 +16,7 @@
  *
  * The installer is written as WebsiteGenerator-Setup.exe.
  *
- *   node scripts/build-desktop.mjs [--no-bundle] [--target <rust triple>]
+ *   node scripts/build-desktop.mjs [--no-bundle] [--target <triple>] [--runner <cmd>]
  *
  * `--target` builds for another platform than this one — the Windows
  * installer from a Linux machine, say — which additionally needs the Rust
@@ -288,7 +288,10 @@ const tauriArgs = ["tauri", "build"];
 if (cross) {
   // Documented Tauri cross-compilation: Rust emits the Windows binary through
   // cargo-xwin, and the NSIS bundler runs against the system makensis.
-  tauriArgs.push("--target", triple, "--runner", "cargo-xwin");
+  // `--runner` overrides that, for a target that needs no MSVC runtime.
+  const flag = process.argv.indexOf("--runner");
+  const runner = flag >= 0 && process.argv[flag + 1] ? process.argv[flag + 1] : "cargo-xwin";
+  tauriArgs.push("--target", triple, "--runner", runner);
 }
 run("npx", tauriArgs, { cwd: path.join(ROOT, "desktop", "tauri") });
 

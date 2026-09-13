@@ -159,7 +159,7 @@ export async function analyseIdentity(args: {
       // design brief. Said plainly, because a model shown an existing design
       // will otherwise reproduce it — and the whole point of rebuilding a
       // dated website is that the result is allowed to be better than it.
-      args.profile.websiteStyleNotes.length &&
+      args.profile.websiteStyleNotes?.length &&
         `Observed on the business's current website: ${args.profile.websiteStyleNotes.join("; ")}\n` +
           `Treat that as evidence about the brand, not as a design to match. If it is dated or generic, depart from it deliberately.`,
       args.profile.menuHighlights.length && `Menu items found: ${args.profile.menuHighlights.map((m) => m.name).join(", ")}`,

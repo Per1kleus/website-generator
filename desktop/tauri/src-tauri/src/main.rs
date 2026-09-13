@@ -225,11 +225,19 @@ fn main() {
                 .path()
                 .resource_dir()
                 .map_err(|e| format!("resource directory unavailable: {e}"))?;
-            // User data lives in the OS profile (%APPDATA% on Windows), never
-            // beside the executable in Program Files.
+            // User data lives in the OS profile, never beside the executable.
+            //
+            // The *local* profile specifically (%LOCALAPPDATA% on Windows) for
+            // two reasons. It is what a SQLite database, uploaded photographs
+            // and published site bundles are: machine-local data, sometimes
+            // hundreds of megabytes, which has no business being synchronised
+            // into a roaming profile. And it is the directory the NSIS
+            // uninstaller offers to delete — put the data anywhere else and
+            // "Delete the application data" silently leaves all of it behind,
+            // which is a worse lie than not offering the option.
             let data_dir = app
                 .path()
-                .app_data_dir()
+                .app_local_data_dir()
                 .map_err(|e| format!("data directory unavailable: {e}"))?;
             std::fs::create_dir_all(&data_dir).ok();
 
