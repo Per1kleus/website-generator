@@ -376,6 +376,123 @@ try {
     sent.every((c) => typeof c.maxOutputTokens === "number" && c.maxOutputTokens > 0),
   );
 
+  /* ------------------------------------------- the existing website input */
+  console.log("\n=== The existing website, as a research source ===\n");
+
+  {
+    // 1. Not supplied. The normal case, and the one that must be unaffected.
+    const before = (await calls()).length;
+    const plain = await generate({ ...CAFE, businessName: "Kafeneio Choris" });
+    const asked = (await calls()).slice(before);
+    const research = asked.find((c) => /You research small businesses/.test(c.system ?? "")) ?? {};
+    record("with no website supplied, generation is unchanged", plain?.status === "ready");
+    record("...and research is never told about a website",
+      !/Existing website/.test(research.prompt ?? ""),
+      (research.prompt ?? "").slice(0, 60));
+
+    const plainProfile = await api(`/api/projects/${plain.id}/status`);
+    record("...and the site document carries no website provenance",
+      !("websiteFields" in (plain?.site?.meta?.facts ?? {})),
+      JSON.stringify(plain?.site?.meta?.facts?.websiteFields ?? null));
+    record("...and the project keeps working normally", plainProfile.status === 200);
+  }
+
+  {
+    // 2. Supplied and readable.
+    const before = (await calls()).length;
+    const withSite = await generate({
+      ...CAFE,
+      businessName: "Kafeneio Palio",
+      websiteUrl: "www.kafeneio-palio.gr",
+    });
+    const asked = (await calls()).slice(before);
+    const research = asked.find((c) => /You research small businesses/.test(c.system ?? "")) ?? {};
+
+    record("a supplied website generates a site", withSite?.status === "ready");
+    record("the address reaches the research step, normalised to https",
+      /Existing website, supplied by the owner: https:\/\/www\.kafeneio-palio\.gr\//.test(research.prompt ?? ""),
+      (research.prompt ?? "").split("\n").find((l) => l.startsWith("Existing website")) ?? "absent");
+    record("research is told the page is a source and not a template",
+      /SOURCE, not a template/i.test(research.system ?? ""));
+    record("research is told the page's own text is not an instruction",
+      /untrusted content/i.test(research.system ?? ""));
+    record("the page is read through the existing grounding, not a new fetcher",
+      JSON.stringify(research.tools ?? []).includes("urlContext"));
+
+    const facts = withSite?.site?.meta?.facts ?? {};
+    record("what the website supplied is named on the document",
+      Array.isArray(facts.websiteFields) && facts.websiteFields.includes("services"),
+      JSON.stringify(facts.websiteFields ?? null));
+    record("website-derived fields are a subset of the verified ones",
+      (facts.websiteFields ?? []).every((f) => (facts.verifiedFields ?? []).includes(f)),
+      `${JSON.stringify(facts.websiteFields)} ⊆ ${JSON.stringify(facts.verifiedFields)}`);
+
+    const briefs = asked.map((c) => c.prompt ?? "").join("\n");
+    record("what the website says reached the copy stage",
+      briefs.includes("run by the same family since 1974"));
+    record("what it looks like reached the identity stage, as a cue to depart from",
+      /Observed on the business's current website/.test(briefs) &&
+        /not as a design to match/i.test(briefs));
+    // The stub's existing site has pages called "Company profile" and "Our
+    // offering". The new site is composed by the layout engine from section
+    // types, so those names must appear nowhere on it.
+    const copy = JSON.stringify(withSite?.site ?? {});
+    record("its page structure never became the new site's structure",
+      !copy.includes("Company profile") && !copy.includes("Our offering") &&
+        !copy.includes("Getting here"));
+    record("...and its section order is the pipeline's, not the old site's",
+      (withSite?.site?.sections ?? [])[0]?.type === "hero",
+      (withSite?.site?.sections ?? []).map((x) => x.type).join(" → "));
+    record("the new site is still composed by the design systems",
+      typeof withSite?.site?.theme?.architecture === "string" &&
+        Boolean(withSite?.site?.theme?.tokens),
+      withSite?.site?.theme?.architecture ?? "");
+  }
+
+  {
+    // 3. Supplied but unreachable. Generation must not fail, and nothing may
+    //    be claimed from a page that was never read.
+    const unreachable = await generate({
+      ...CAFE,
+      businessName: "Kafeneio Kleisto",
+      websiteUrl: "https://unreachable.example.com",
+    });
+    record("an unreachable website does not fail generation", unreachable?.status === "ready");
+    const facts = unreachable?.site?.meta?.facts ?? {};
+    record("...and nothing is claimed to have come from it",
+      !("websiteFields" in facts) || (facts.websiteFields ?? []).length === 0,
+      JSON.stringify(facts.websiteFields ?? null));
+    record("...and the site is complete anyway",
+      Array.isArray(unreachable?.site?.sections) && unreachable.site.sections.length >= 3,
+      `${unreachable?.site?.sections?.length ?? 0} sections`);
+  }
+
+  {
+    // 4. Invalid. Rejected at the boundary with something a person can act on,
+    //    and the same project creates fine once the field is cleared.
+    for (const [url, why] of [
+      ["not a web address", "a sentence"],
+      ["http://127.0.0.1:11434", "this computer"],
+      ["javascript:alert(1)", "a script URL"],
+    ]) {
+      const res = await api("/api/projects", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...CAFE, businessName: "Kafeneio Lathos", websiteUrl: url }),
+      });
+      record(`an invalid website URL is refused: ${why}`, res.status === 400, `${res.status}`);
+      record(`...with a message that says it can be left empty: ${why}`,
+        /leave that field empty/i.test(res.json?.error ?? ""), res.json?.error ?? "");
+    }
+
+    const cleared = await api("/api/projects", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...CAFE, businessName: "Kafeneio Lathos", websiteUrl: "" }),
+    });
+    record("clearing the field lets the project be created", cleared.status === 200);
+  }
+
   /* --------------------------------------------------------- translation */
   console.log("\n=== Translation ===\n");
 

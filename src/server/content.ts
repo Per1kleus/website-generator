@@ -158,6 +158,10 @@ function brief(args: {
     p.atmosphere && `Atmosphere: ${p.atmosphere}`,
     p.targetAudience && `Audience: ${p.targetAudience}`,
     p.positioning && `Positioning: ${p.positioning}`,
+    // What the business's existing website says about itself: a source for
+    // what it does, never wording to reuse and never a structure to follow.
+    p.websiteSummary &&
+      `From the business's existing website (facts only — do not reuse its wording or its structure):\n${p.websiteSummary}`,
     args.description && `Owner's own words:\n${args.description}`,
   ].filter(Boolean);
 

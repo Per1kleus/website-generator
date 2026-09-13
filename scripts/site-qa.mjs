@@ -38,6 +38,7 @@ const {
 } = await import("../src/lib/seo.ts");
 const { deriveTokens, readSignals, NEUTRAL_SIGNALS } = await import("../src/lib/tokens.ts");
 const { renderSite, renderSitemap, renderRobots } = await import("../src/lib/render.ts");
+const { checkWebsiteUrl, isUsableWebsiteUrl, websiteHost } = await import("../src/lib/website-url.ts");
 
 const PRESET = "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
 const EXEC = process.env.PW_CHROME ?? (existsSync(PRESET) ? PRESET : undefined);
@@ -724,6 +725,114 @@ async function cornerImage(file, corner, width = 1600, height = 1000) {
   record("an image no longer on the page drops out of the placements",
     syncPlacements({ ...site, sections: site.sections.filter((s) => s.type !== "gallery") }, assets)
       .images.every((p) => p.assetId !== "a"));
+}
+
+/* ======================================================================
+   4. The existing-website input
+   ====================================================================== */
+
+console.log("\n=== The existing website a creator can supply ===\n");
+
+{
+  const ok = (raw) => checkWebsiteUrl(raw);
+
+  record("leaving it empty is a success, not an error",
+    ok("").ok === true && ok("").url === "");
+  record("whitespace alone is the same as empty", ok("   ").ok === true && ok("   ").url === "");
+
+  record("a bare name is understood as https",
+    ok("kafeneio.gr").ok && ok("kafeneio.gr").url === "https://kafeneio.gr/",
+    ok("kafeneio.gr").url ?? ok("kafeneio.gr").error);
+  record("a full address is kept as typed",
+    ok("https://www.kafeneio.gr/menu").url === "https://www.kafeneio.gr/menu");
+  record("http is accepted — plenty of old business sites are still on it",
+    ok("http://kafeneio.gr").ok === true);
+  record("the fragment is dropped, being a position on a page rather than one",
+    ok("https://kafeneio.gr/menu#drinks").url === "https://kafeneio.gr/menu");
+  record("a query string is kept, since it can name the page",
+    ok("https://kafeneio.gr/?page=about").url === "https://kafeneio.gr/?page=about");
+
+  for (const [raw, why] of [
+    ["not a website at all", "a sentence"],
+    ["javascript:alert(1)", "a script URL"],
+    ["data:text/html,<h1>hi</h1>", "a data URL"],
+    ["file:///etc/passwd", "a file URL"],
+    ["ftp://example.com", "a non-web scheme"],
+    ["localhost", "this computer by name"],
+    ["http://localhost:3000", "this computer with a port"],
+    ["http://127.0.0.1:11434", "the loopback address"],
+    ["http://[::1]/", "loopback over IPv6"],
+    ["http://10.0.0.5", "a private network"],
+    ["http://192.168.1.10/admin", "a home router"],
+    ["http://172.16.4.4", "a private range"],
+    ["http://169.254.169.254/latest/meta-data/", "the cloud metadata address"],
+    ["http://printer.local", "a name only a local network resolves"],
+    ["https://intranet.internal", "an internal name"],
+    [`https://example.com/${"a".repeat(2100)}`, "an address too long to be real"],
+  ]) {
+    const result = ok(raw);
+    record(`rejected: ${why}`, result.ok === false && result.error.length > 10,
+      result.ok ? "accepted" : "");
+  }
+
+  const creds = ok("https://admin:hunter2@example.com/");
+  record("an address carrying a password is rejected", creds.ok === false);
+  record("...and the password is not repeated back in the message",
+    creds.ok === false && !creds.error.includes("hunter2"), creds.ok ? "" : creds.error);
+
+  record("every rejection explains itself in words a person can act on",
+    ["nope", "http://127.0.0.1", "javascript:alert(1)", "https://a:b@example.com"].every((raw) => {
+      const r = ok(raw);
+      return !r.ok && /^[A-Z]/.test(r.error) && r.error.split(" ").length >= 5;
+    }));
+
+  record("an absent address counts as usable, because it is optional",
+    isUsableWebsiteUrl("") === true && isUsableWebsiteUrl("https://example.com") === true);
+  record("a broken address never counts as usable", isUsableWebsiteUrl("http://localhost") === false);
+
+  record("the host is named without the www, for saying what could not be read",
+    websiteHost("https://www.kafeneio.gr/menu") === "kafeneio.gr",
+    websiteHost("https://www.kafeneio.gr/menu"));
+  record("an absent address has no host to name", websiteHost("") === "");
+}
+
+{
+  // The document carries the distinction between "verified" and "the business
+  // says so on its own website", and verifiedFields stays the gate either way:
+  // website provenance is extra information about a verified field, never a
+  // second route past the verification.
+  const bare = makeSite([hero(), about(), contact(), footer()], { name: "Fournos Bakery" });
+  const site = withCopy(bare);
+
+  const websiteVerified = facts({
+    category: "Bakery", location: "Thessaloniki",
+    services: ["Sourdough", "Pastries"],
+    verifiedFields: ["category", "location", "services"],
+    websiteFields: ["services"],
+  });
+  const carried = { ...site, meta: { ...site.meta, facts: websiteVerified } };
+  record("website-derived fields travel on the document beside the verified ones",
+    JSON.stringify(carried.meta.facts.websiteFields) === JSON.stringify(["services"]) &&
+      carried.meta.facts.verifiedFields.includes("services"));
+  record("a document with no existing website simply has no websiteFields key",
+    !("websiteFields" in facts()));
+
+  const titleFromWebsite = buildTitle({ site, locale: "en", facts: websiteVerified });
+  record("a verified field that came from the website is used like any other",
+    titleFromWebsite.includes("Thessaloniki"), titleFromWebsite);
+
+  // The failure this guards against: a model naming a field in websiteFields
+  // that it never verified, and that being taken as permission to state it.
+  const claimedOnly = facts({
+    category: "Bakery", location: "Thessaloniki", priceRange: "€€",
+    verifiedFields: [], websiteFields: ["category", "priceRange"],
+  });
+  const data = buildStructuredData({ site, locale: "en", facts: claimedOnly },
+    { canonical: "https://example.gr" });
+  record("an unverified website claim is not published as structured data",
+    !("priceRange" in data), JSON.stringify(data.priceRange ?? null));
+  record("...and naming it in websiteFields does not get it published either",
+    !JSON.stringify(data).includes("€€"), JSON.stringify(data).slice(0, 80));
 }
 
 /* ======================================================================

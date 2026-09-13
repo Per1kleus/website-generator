@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/server/auth";
 import { deleteProject, getProject, updateProjectFields } from "@/server/projects";
 import { isProbablyMapsUrl } from "@/lib/maps";
+import { checkWebsiteUrl } from "@/lib/website-url";
 
 export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }> }) {
   const user = await getCurrentUser();
@@ -17,11 +18,19 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
   if ((b.business_name ?? "").trim().length < 2) {
     return NextResponse.json({ error: "Enter the name of the business." }, { status: 400 });
   }
+  const website = checkWebsiteUrl(b.website_url ?? "");
+  if (!website.ok) {
+    return NextResponse.json(
+      { error: `${website.error} You can also leave that field empty.` },
+      { status: 400 },
+    );
+  }
 
   updateProjectFields(id, user.id, {
     business_name: b.business_name?.trim(),
     business_type: b.business_type?.trim(),
     maps_url: b.maps_url?.trim(),
+    website_url: website.url,
     location: b.location?.trim(),
     phone: b.phone?.trim(),
     email: b.email?.trim(),

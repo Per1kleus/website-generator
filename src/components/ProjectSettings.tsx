@@ -5,11 +5,13 @@ import { useState } from "react";
 import { AppShell } from "./AppShell";
 import { AppBar, Banner, BottomSheet, Button, Card, Field, TextArea, TextInput, useToast } from "./ui";
 import { isProbablyMapsUrl } from "@/lib/maps";
+import { checkWebsiteUrl } from "@/lib/website-url";
 
 type Fields = {
   business_name: string;
   business_type: string;
   maps_url: string;
+  website_url: string;
   location: string;
   phone: string;
   email: string;
@@ -46,6 +48,8 @@ export function ProjectSettings({
     if (form.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) {
       next.email = "Enter a valid email address.";
     }
+    const website = checkWebsiteUrl(form.website_url);
+    if (!website.ok) next.website_url = `${website.error} You can also leave it empty.`;
     setErrors(next);
     if (Object.keys(next).length) return;
 
@@ -108,6 +112,14 @@ export function ProjectSettings({
             <TextInput id={id} aria-describedby={describedBy} invalid={invalid}
               type="url" inputMode="url" autoCapitalize="none" autoCorrect="off" spellCheck={false}
               value={form.maps_url} onChange={(e) => set("maps_url", e.target.value)} />
+          )}
+        </Field>
+        <Field label="Existing website" error={errors.website_url}>
+          {({ id, describedBy, invalid }) => (
+            <TextInput id={id} aria-describedby={describedBy} invalid={invalid}
+              type="url" inputMode="url" autoCapitalize="none" autoCorrect="off" spellCheck={false}
+              placeholder="https://www.example.com"
+              value={form.website_url} onChange={(e) => set("website_url", e.target.value)} />
           )}
         </Field>
         <Field label="Town or city">

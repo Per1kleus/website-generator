@@ -2,6 +2,7 @@ import "server-only";
 import type { Locale } from "@/lib/locales";
 import type { Site, SiteKind } from "@/lib/site";
 import { parseMapsUrl } from "@/lib/maps";
+import { checkWebsiteUrl, websiteHost } from "@/lib/website-url";
 import { themeFor } from "@/lib/styles";
 import { assembleSite, generateContent } from "./content";
 import { analyseIdentity, themeFromIdentity, type VisualIdentity } from "./identity";
@@ -38,6 +39,8 @@ export type GenerationInput = {
   businessType: string;
   siteKind: SiteKind;
   mapsUrl: string;
+  /** The business's existing website, when it has one. "" is the normal case. */
+  websiteUrl: string;
   location: string;
   phone: string;
   email: string;
@@ -84,8 +87,22 @@ export async function runGeneration(
   // than the probe, so a first generation is not held up by a download.
   void ensureFirstLaunch();
 
-  /* 1. Research ---------------------------------------------------------- */
-  report("research", usedAi ? "Researching the business" : "Reading your details");
+  /* 1. Research ----------------------------------------------------------
+     The existing website, when there is one, is one more source here and
+     nowhere else: it is read by the research step and turns into the same
+     verified/unverified profile every other source produces. Everything that
+     decides what the new site looks like happens downstream of this, which is
+     why supplying a dated website cannot drag the new one down to it. */
+  const website = checkWebsiteUrl(input.websiteUrl ?? "");
+  const websiteUrl = website.ok ? website.url : "";
+  report(
+    "research",
+    !usedAi
+      ? "Reading your details"
+      : websiteUrl
+        ? `Researching the business, including ${websiteHost(websiteUrl)}`
+        : "Researching the business",
+  );
   let profile: BusinessProfile;
   try {
     profile = await researchBusiness({
@@ -94,10 +111,24 @@ export async function runGeneration(
       mapsUrl: input.mapsUrl,
       location: input.location,
       description: input.description,
+      websiteUrl,
     });
   } catch (err) {
     console.error("[generate] research failed:", describeError(err));
     profile = { ...emptyProfile(), name: input.businessName, category: input.businessType };
+  }
+  // A website that could not be read is reported and then left behind. It is
+  // never a reason to stop: the other sources are still there, and so is
+  // everything the creator typed.
+  if (websiteUrl && usedAi) {
+    report(
+      "research",
+      profile.websiteReachable
+        ? `Read ${websiteHost(websiteUrl)} — ${profile.websiteFields.length} detail${
+            profile.websiteFields.length === 1 ? "" : "s"
+          } came from it`
+        : `${websiteHost(websiteUrl)} could not be read — continuing with the other sources`,
+    );
   }
   // The creator's own input always wins over research for contact details:
   // they know their own phone number.
@@ -329,6 +360,9 @@ function factsFromProfile(profile: BusinessProfile): BusinessFacts {
     menuHighlights: profile.menuHighlights.map((m) => ({ name: m.name, price: m.price })),
     positioning: profile.positioning,
     verifiedFields: profile.verifiedFields,
+    // Only when there is something to say. An absent key reads as "no
+    // existing website was involved", which is the common case.
+    ...(profile.websiteFields.length ? { websiteFields: profile.websiteFields } : {}),
   };
 }
 

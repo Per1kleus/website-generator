@@ -219,8 +219,23 @@ async function main() {
   await page.getByLabel("Phone").fill("+30 2310 000000");
   const recognised = await page.getByText(/Recognised: Caffe Verde/i).isVisible();
   record("Google Maps link is parsed and confirmed inline", recognised);
+
+  // The existing website is optional, and a broken one has to be recoverable
+  // in place: the creator must be able to fix it or clear it and carry on.
+  const website = page.getByLabel("Existing website");
+  record("the existing-website field is offered on the location step",
+    await website.isVisible());
+  await website.fill("http://localhost:3000");
+  await page.getByRole("button", { name: "Continue" }).click();
+  const refused = await page.getByText(/points at this computer|private network/i).isVisible();
+  record("a broken website address stops the step and explains itself", refused);
+  record("...and the step is still the location step, not a lost page",
+    await page.getByLabel("Google Maps link").isVisible());
+  await website.fill("");
   await page.screenshot({ path: `${SHOTS}/04-wizard-maps.png` });
   await page.getByRole("button", { name: "Continue" }).click();
+  record("clearing the optional website lets the wizard continue",
+    await page.getByRole("radio", { name: /Digital menu/ }).isVisible());
 
   // Step 3: website type
   await checkTargets(page, "wizard step 3", POINTER_TARGET);

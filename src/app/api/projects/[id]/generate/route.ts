@@ -24,6 +24,7 @@ export async function POST(_req: Request, ctx: { params: Promise<{ id: string }>
     businessType: project.business_type,
     siteKind: project.site_kind as SiteKind,
     mapsUrl: project.maps_url,
+    websiteUrl: project.website_url ?? "",
     location: project.location,
     phone: project.phone,
     email: project.email,

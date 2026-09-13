@@ -251,6 +251,13 @@ export type BusinessFacts = {
   positioning: string;
   /** Field names the research confirmed with a source. */
   verifiedFields: string[];
+  /**
+   * The subset of `verifiedFields` whose evidence was the business's own
+   * existing website — what it says about itself, rather than what a second
+   * source confirmed. Optional: absent on every document generated before the
+   * existing-website input, and on every project that did not supply one.
+   */
+  websiteFields?: string[];
 };
 
 export type Logo = {

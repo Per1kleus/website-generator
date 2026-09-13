@@ -5,6 +5,7 @@ import { isSupportedLocale } from "@/lib/locales";
 import { SITE_KINDS } from "@/lib/site";
 import { STYLE_PRESETS } from "@/lib/styles";
 import { isProbablyMapsUrl } from "@/lib/maps";
+import { checkWebsiteUrl } from "@/lib/website-url";
 
 export async function POST(req: Request) {
   const user = await getCurrentUser();
@@ -30,6 +31,17 @@ export async function POST(req: Request) {
     );
   }
 
+  // The existing website is optional in the strongest sense: leaving it empty
+  // is a success. A malformed one is rejected with a message that says what is
+  // wrong, so the creator can fix it or clear the field and carry on.
+  const website = checkWebsiteUrl(s("websiteUrl"));
+  if (!website.ok) {
+    return NextResponse.json(
+      { error: `${website.error} You can also leave that field empty.` },
+      { status: 400 },
+    );
+  }
+
   const siteKind = SITE_KINDS.some((k) => k.id === body.siteKind) ? s("siteKind") : "business";
   const style = s("style") in STYLE_PRESETS ? s("style") : "classic";
 
@@ -47,6 +59,7 @@ export async function POST(req: Request) {
     businessType: s("businessType"),
     siteKind,
     mapsUrl,
+    websiteUrl: website.url,
     location: s("location"),
     phone: s("phone"),
     email: s("email"),

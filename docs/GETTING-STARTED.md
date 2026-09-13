@@ -166,8 +166,12 @@ Click **New project** in the sidebar. There are five short steps:
    logo here too. The description matters: the more real detail you give, the
    better the result.
 2. **Location** — a Google Maps link if you have one (paste the share link),
-   the town or city, a phone number and an email. The phone number becomes a
-   tap-to-call button.
+   the business's existing website if it already has one, the town or city, a
+   phone number and an email. The phone number becomes a tap-to-call button.
+   The existing website is optional: leave it empty and nothing changes. Fill
+   it in and the app reads it as one more source of facts about the business —
+   it does not copy it, so the new website is still designed from scratch and
+   can be a great deal better than the old one.
 3. **What to build** — pick **Full business website** (or one of the other
    kinds).
 4. **Languages** — your main language, plus any others. Choosing two or more

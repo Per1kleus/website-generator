@@ -69,7 +69,39 @@ function shapeOf(text) {
     atmosphere: "", audience: "local customers", positioning: "" };
 }
 
-function research(name, shape = shapeOf(name)) {
+/**
+ * What the stub does with a supplied existing website.
+ *
+ * Two behaviours, chosen by the address itself, so a suite can exercise both
+ * without a second stub mode: an address containing "unreachable" answers the
+ * way a real model answers a page it could not open — reachable false, nothing
+ * claimed from it — and anything else answers the way it answers a page it
+ * read. The URL is echoed into `sources`, because the application checks that
+ * a page claimed as read is actually among the sources consulted.
+ */
+function websiteFindings(url) {
+  if (!url) return { websiteReachable: false, websiteFields: [], websiteSummary: "", websiteStyleNotes: [], websiteStructure: [], sources: [] };
+  if (/unreachable|does-not-exist/i.test(url)) {
+    return {
+      websiteReachable: false, websiteFields: [], websiteSummary: "",
+      websiteStyleNotes: [], websiteStructure: [], sources: [],
+      unknown: `The existing website ${url} did not load.`,
+    };
+  }
+  return {
+    websiteReachable: true,
+    websiteFields: ["services", "openingHours"],
+    websiteSummary: "The existing website says the business has been run by the same family since 1974.",
+    websiteStyleNotes: ["dark green and cream", "a centred logo over a photograph", "dated stock photography"],
+    // Deliberately unlike anything this application would write, so a test can
+    // tell "the old site's structure leaked through" from a coincidence.
+    websiteStructure: ["Welcome", "Company profile", "Our offering", "Getting here"],
+    sources: [url],
+  };
+}
+
+function research(name, shape = shapeOf(name), website = "") {
+  const found = websiteFindings(website);
   return {
     name,
     category: shape.category,
@@ -97,10 +129,15 @@ function research(name, shape = shapeOf(name)) {
     atmosphere: shape.atmosphere,
     targetAudience: shape.audience,
     positioning: shape.positioning,
-    verifiedFields: ["name", "category", "location"],
-    sources: ["https://example.com/kafeneio"],
-    unknowns: ["email"],
+    verifiedFields: ["name", "category", "location", ...found.websiteFields],
+    sources: ["https://example.com/kafeneio", ...found.sources],
+    unknowns: ["email", ...(found.unknown ? [found.unknown] : [])],
     confidence: "medium",
+    websiteReachable: found.websiteReachable,
+    websiteFields: found.websiteFields,
+    websiteSummary: found.websiteSummary,
+    websiteStyleNotes: found.websiteStyleNotes,
+    websiteStructure: found.websiteStructure,
   };
 }
 
@@ -217,7 +254,8 @@ function answerFor(body) {
 
   if (/You research small businesses/i.test(system)) {
     const named = /^Business:\s*(.+)$/m.exec(user)?.[1]?.trim();
-    return JSON.stringify(research(named || "Kafeneio", shapeOf(user)));
+    const website = /^Existing website, supplied by the owner:\s*(\S+)$/m.exec(user)?.[1] ?? "";
+    return JSON.stringify(research(named || "Kafeneio", shapeOf(user), website));
   }
 
   if (/senior brand and web designer/i.test(system)) {
@@ -415,6 +453,9 @@ const server = createServer((req, res) => {
       model: /models\/([^:]+):/.exec(req.url ?? "")?.[1] ?? "",
       hasKey: true,
       system: JSON.stringify(parsed.systemInstruction ?? ""),
+      // The user turn as plain text, so a suite can assert what was actually
+      // asked rather than picking the request body apart itself.
+      prompt: textOf(parsed.contents),
       tools: parsed.config?.tools ?? parsed.tools ?? [],
       thinking: parsed.generationConfig?.thinkingConfig ?? parsed.config?.thinkingConfig ?? null,
       maxOutputTokens:

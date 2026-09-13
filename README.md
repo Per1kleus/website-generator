@@ -161,6 +161,30 @@ carries a verification flag, and the model is instructed to leave a field empty
 rather than guess. Prices, hours, reviews, awards and contact details are
 treated as facts a customer could act on and be wrong about.
 
+A creator may also supply the business's **existing website**. It is optional
+everywhere — generation is identical without one — and when it is given it is
+one more source for the same research step, read through the same
+`urlContext` grounding rather than by a second scraping mechanism of its own.
+What it produces is held to the same standard as anything else: a field is only
+established if a source says so, and the subset that came from that website is
+named separately in `websiteFields`, so "the business says this about itself"
+is never confused with "this was confirmed independently". If the page cannot
+be read, generation continues with the other sources and says so.
+
+The supplied address is untrusted twice over. `lib/website-url.ts` decides what
+the string may be — http or https only, no credentials, nothing resolving to
+this machine or a private network — and `server/research.ts` decides what the
+page may be: evidence about a business, never an instruction. Nothing in this
+process ever opens a connection to it and nothing on it is executed; the page
+is fetched by Google's grounding infrastructure and only its text comes back.
+
+It is a source, not a template. The design, the section order and the copy are
+still decided by the systems downstream — the design catalogue, identity
+analysis, the layout engine, the token engine, image intelligence, the SEO
+engine and visual QA — which is what allows the new site to be better than a
+dated existing one rather than a copy of it. What the old site looks like
+reaches identity analysis explicitly labelled as a cue to depart from.
+
 Downstream this is enforced, not just requested:
 
 - copy generation only sees what research established, plus an explicit list of

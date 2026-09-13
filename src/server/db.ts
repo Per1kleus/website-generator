@@ -173,6 +173,9 @@ const COLUMNS: [table: string, column: string, ddl: string][] = [
   ["projects", "business_profile", "TEXT"],
   ["projects", "design_system", "TEXT"],
   ["projects", "design_answers", "TEXT NOT NULL DEFAULT '{}'"],
+  // The business's existing website, when it has one. Optional everywhere: an
+  // empty string means "not supplied", which is what every existing row gets.
+  ["projects", "website_url", "TEXT NOT NULL DEFAULT ''"],
   ["assets", "role", "TEXT NOT NULL DEFAULT 'photo'"],
   ["assets", "has_alpha", "INTEGER NOT NULL DEFAULT 0"],
   ["assets", "drive_file_id", "TEXT NOT NULL DEFAULT ''"],

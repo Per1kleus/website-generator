@@ -13,6 +13,8 @@ export type ProjectRow = {
   business_type: string;
   site_kind: string;
   maps_url: string;
+  /** The business's existing website, if it has one. "" when not supplied. */
+  website_url: string;
   location: string;
   phone: string;
   email: string;
@@ -108,6 +110,8 @@ export type NewProject = {
   businessType: string;
   siteKind: string;
   mapsUrl: string;
+  /** Already validated by the caller; "" when the creator left it empty. */
+  websiteUrl: string;
   location: string;
   phone: string;
   email: string;
@@ -125,12 +129,12 @@ export function createProject(p: NewProject): Project {
   db.prepare(
     `INSERT INTO projects
        (id, user_id, name, business_name, business_type, site_kind, maps_url,
-        location, phone, email, description, design, status, created_at, updated_at,
-        logo_asset_id, default_locale, locales, design_notes)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?)`,
+        website_url, location, phone, email, description, design, status,
+        created_at, updated_at, logo_asset_id, default_locale, locales, design_notes)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?)`,
   ).run(
     id, p.userId, p.name || p.businessName, p.businessName, p.businessType,
-    p.siteKind, p.mapsUrl, p.location, p.phone, p.email, p.description,
+    p.siteKind, p.mapsUrl, p.websiteUrl, p.location, p.phone, p.email, p.description,
     JSON.stringify({ style: p.style }), now, now,
     p.logoAssetId, p.defaultLocale, JSON.stringify(p.locales), p.designNotes,
   );
@@ -203,7 +207,13 @@ export function updateProjectSite(id: string, userId: string, site: Site): void 
 export function updateProjectFields(
   id: string,
   userId: string,
-  fields: Partial<Pick<ProjectRow, "name" | "business_name" | "business_type" | "maps_url" | "location" | "phone" | "email" | "description" | "site_kind">>,
+  fields: Partial<
+    Pick<
+      ProjectRow,
+      | "name" | "business_name" | "business_type" | "maps_url" | "website_url"
+      | "location" | "phone" | "email" | "description" | "site_kind"
+    >
+  >,
 ): void {
   const entries = Object.entries(fields).filter(([, v]) => v !== undefined);
   if (!entries.length) return;

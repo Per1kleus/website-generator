@@ -9,6 +9,7 @@ import { LOCALES, localeInfo, type Locale } from "@/lib/locales";
 import { SITE_KINDS, type SiteKind } from "@/lib/site";
 import { STYLE_OPTIONS } from "@/lib/styles";
 import { isProbablyMapsUrl, parseMapsUrl } from "@/lib/maps";
+import { checkWebsiteUrl } from "@/lib/website-url";
 
 /**
  * Project creation as a stepped flow (requirement 4).
@@ -25,6 +26,7 @@ type Form = {
   businessName: string;
   businessType: string;
   mapsUrl: string;
+  websiteUrl: string;
   location: string;
   phone: string;
   email: string;
@@ -50,6 +52,7 @@ export function CreateWizard() {
     businessName: "",
     businessType: "",
     mapsUrl: "",
+    websiteUrl: "",
     location: "",
     phone: "",
     email: "",
@@ -83,6 +86,10 @@ export function CreateWizard() {
       if (form.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) {
         next.email = "Enter a valid email address.";
       }
+      // Optional, so an empty field is valid. Only a broken address stops the
+      // step, and the message says it can simply be cleared.
+      const website = checkWebsiteUrl(form.websiteUrl);
+      if (!website.ok) next.websiteUrl = `${website.error} You can also leave it empty.`;
     }
     setErrors(next);
     return Object.keys(next).length === 0;
@@ -288,6 +295,20 @@ export function CreateWizard() {
               <span>{maps.placeName ? `Recognised: ${maps.placeName}` : "Google Maps link recognised."}</span>
             </p>
           )}
+
+          <Field
+            label="Existing website"
+            hint="Optional. If the business already has a website, we read it as one more source — the new one is still designed from scratch."
+            error={errors.websiteUrl}
+          >
+            {({ id, describedBy, invalid }) => (
+              <TextInput id={id} aria-describedby={describedBy} invalid={invalid}
+                type="url" inputMode="url" value={form.websiteUrl}
+                onChange={(e) => set("websiteUrl", e.target.value)}
+                placeholder="https://www.example.com"
+                autoCapitalize="none" autoCorrect="off" spellCheck={false} enterKeyHint="next" />
+            )}
+          </Field>
 
           <Field label="Town or city" error={errors.location}>
             {({ id, describedBy, invalid }) => (

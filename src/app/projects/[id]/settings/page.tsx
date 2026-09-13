@@ -25,6 +25,7 @@ export default async function SettingsPage({
         business_name: project.business_name,
         business_type: project.business_type,
         maps_url: project.maps_url,
+        website_url: project.website_url ?? "",
         location: project.location,
         phone: project.phone,
         email: project.email,

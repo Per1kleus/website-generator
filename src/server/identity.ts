@@ -155,6 +155,13 @@ export async function analyseIdentity(args: {
       args.profile.priceRange && `Price range: ${args.profile.priceRange}`,
       args.profile.reviewThemes.length && `Recurring review themes: ${args.profile.reviewThemes.join("; ")}`,
       args.profile.services.length && `Services found: ${args.profile.services.join(", ")}`,
+      // The business's current website is a signal about the brand, not a
+      // design brief. Said plainly, because a model shown an existing design
+      // will otherwise reproduce it — and the whole point of rebuilding a
+      // dated website is that the result is allowed to be better than it.
+      args.profile.websiteStyleNotes.length &&
+        `Observed on the business's current website: ${args.profile.websiteStyleNotes.join("; ")}\n` +
+          `Treat that as evidence about the brand, not as a design to match. If it is dated or generic, depart from it deliberately.`,
       args.profile.menuHighlights.length && `Menu items found: ${args.profile.menuHighlights.map((m) => m.name).join(", ")}`,
       args.description && `Owner's own words:\n${args.description}`,
       args.designNotes && `Design preferences the creator asked for: ${args.designNotes}`,
