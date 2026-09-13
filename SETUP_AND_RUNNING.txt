@@ -1,0 +1,364 @@
+================================================================================
+WEBSITE GENERATOR
+SETUP & RUNNING GUIDE
+================================================================================
+
+You have the repository. This file tells you what to install, how to run it,
+how to test it, and how to build the Windows application.
+
+Follow it from top to bottom. Every command below was run against this
+repository; anything that could not be verified here is marked NOT VERIFIED.
+
+
+--------------------------------------------------------------------------------
+1. REQUIREMENTS
+--------------------------------------------------------------------------------
+
+REQUIRED
+
+  Node.js 22
+      This is what CI uses (.github/workflows/ci.yml pins node-version: 22)
+      and what the project was verified with (v22.22.2, npm 10.9.7).
+      Get it from https://nodejs.org
+
+  npm
+      Comes with Node.js. No separate install.
+
+That is all you need to run the application.
+
+OPTIONAL (the app works fully without each of these)
+
+  Python 3
+      Runs the bundled design catalogue (vendor/ui-ux-pro-max), which picks
+      the style, colours and fonts for a business. Without it the app uses
+      built-in presets instead.
+
+  Ollama                      https://ollama.com
+      A small local model (~400MB) writes better questions for the design
+      catalogue. Without it, a built-in rule set writes them.
+
+  Gemini API key              https://aistudio.google.com/apikey
+      Turns on business research, written copy and translation. Without it
+      the app still generates a complete website from what you type.
+
+ONLY FOR BUILDING THE WINDOWS INSTALLER (section 7)
+
+  Windows
+  Rust (stable)               https://rustup.rs
+  Tauri v2 prerequisites      Microsoft C++ Build Tools, and WebView2
+                              (already present on Windows 11)
+
+ONLY FOR BUILDING THE ANDROID APK
+
+  JDK 21 and the Android SDK.
+
+You do NOT need: Git (beyond cloning), Docker, a database server, or any
+global npm packages.
+
+
+--------------------------------------------------------------------------------
+2. INSTALLATION
+--------------------------------------------------------------------------------
+
+Open a terminal in the repository folder and run:
+
+    npm install
+
+That is the whole installation. It also runs the first-setup check
+automatically (see section 4) and will not fail if the optional pieces are
+missing.
+
+The database is SQLite and is created on first run. There is nothing to
+install or configure for it.
+
+
+--------------------------------------------------------------------------------
+3. ENVIRONMENT VARIABLES
+--------------------------------------------------------------------------------
+
+EVERY variable is optional. The application runs with no configuration at all.
+
+To set any of them, copy the example file and edit your copy:
+
+    cp .env.example .env.local          (macOS / Linux)
+    copy .env.example .env.local        (Windows)
+
+Next.js reads .env.local automatically. The full list with explanations is in
+.env.example. The ones that matter most:
+
+  GEMINI_API_KEY
+      Turns on AI research, copywriting and translation.
+      Without it the app uses its own template generator.
+
+  WG_DATA_DIR
+      Where the SQLite database, uploads and published sites are stored.
+      Defaults to ./data in the repository folder.
+
+  OLLAMA_HOST
+      Where the local Ollama daemon is. Defaults to http://127.0.0.1:11434
+
+  WG_OLLAMA_MODEL
+      Which local model to use. Defaults to qwen2.5:0.5b
+
+  WG_OLLAMA_AUTOPULL
+      Set to 0 to never download a model automatically.
+
+  GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET
+      Turns on building a Digital Menu from a Google Sheet.
+
+  WG_SECRET
+      Encrypts stored Google tokens. Fine to leave unset for a local,
+      single-user install. Set it for any deployment holding other
+      people's tokens.
+
+NOTE: in the packaged Windows application you do not edit files. Keys are
+entered on the app's own Profile screen and stored encrypted in your Windows
+profile.
+
+
+--------------------------------------------------------------------------------
+4. FIRST SETUP
+--------------------------------------------------------------------------------
+
+`npm install` already ran this. To run it again deliberately:
+
+    npm run setup
+
+It checks two optional things and never fails:
+
+  - the design catalogue (needs only Python 3)
+  - Ollama; if the daemon is running, it downloads the small model once
+
+Example of what you will see when neither is fully present:
+
+    Website Generator — setup
+
+      ✓ Design catalogue (ui-ux-pro-max) ready
+      · Ollama not running at http://127.0.0.1:11434.
+
+That output is fine. The application runs normally either way.
+
+
+--------------------------------------------------------------------------------
+5. RUNNING THE APPLICATION
+--------------------------------------------------------------------------------
+
+There are three different ways to run this project. Pick the one you want.
+
+--- 5a. DEVELOPMENT MODE (what you want while changing code) ---
+
+One terminal:
+
+    npm run dev
+
+Then open:
+
+    http://localhost:3000
+
+Code changes reload automatically. Stop it with Ctrl+C.
+
+--- 5b. PRODUCTION MODE (the real build, run locally) ---
+
+One terminal, two commands:
+
+    npm run build
+    npm start
+
+Then open:
+
+    http://localhost:3000
+
+To use a different port:
+
+    npx next start -p 3100
+
+Stop it with Ctrl+C.
+
+--- 5c. THE DESKTOP APPLICATION, WITHOUT BUILDING AN INSTALLER ---
+
+This runs the same server the packaged Windows app runs:
+
+    npm run desktop:dev
+
+It builds first, then starts the server the way the desktop shell does.
+Stop it with Ctrl+C.
+
+FIRST TIME YOU OPEN THE APP: create an account on the sign-up screen. It is
+a local account in your own database; nothing is sent anywhere.
+
+
+--------------------------------------------------------------------------------
+6. TESTING
+--------------------------------------------------------------------------------
+
+Two quick checks that need nothing running:
+
+    npm run typecheck
+    npm run build
+
+There are ten test suites. They fall into three groups, and the difference
+matters — some need you to start the application first.
+
+GROUP A — need NOTHING running. Just run them:
+
+    npm run test:site              (199 checks)
+    npm run test:design-systems    (59 checks)
+
+GROUP B — start their own server automatically. Just run them:
+
+    npm run test:design            (21 checks)
+    npm run test:menu              (47 checks)
+    npm run test:gemini            (49 checks)
+    npm run test:setup             (40 checks)
+    npm run test:desktop           (36 checks)
+
+GROUP C — need the application ALREADY RUNNING on port 3100.
+
+    TERMINAL 1 — start the application and leave it running:
+
+        npm run build
+        npx next start -p 3100
+
+    TERMINAL 2 — run the suite:
+
+        npm run test:preview       (60 checks)
+        npm run test:studio        (157 checks)
+        npm run test:mobile        (217 checks)
+
+    These three default to http://localhost:3100. If your server is on a
+    different address, pass it as an argument, for example:
+
+        node scripts/preview-qa.mjs http://localhost:3000
+
+When you are finished, stop the server in Terminal 1 with Ctrl+C.
+
+KNOWN BROKEN COMMAND
+
+    npm run lint
+
+    Does not work. The script calls `next lint`, which was removed in
+    Next.js 16. Use `npm run typecheck` instead. This is a pre-existing
+    issue in the repository, not something you have set up wrongly.
+
+
+--------------------------------------------------------------------------------
+7. BUILDING THE WINDOWS APPLICATION
+--------------------------------------------------------------------------------
+
+You must be ON WINDOWS, with Rust and the Tauri v2 prerequisites installed
+(see section 1).
+
+    npm ci
+    npm run build:windows
+
+The installer is written to:
+
+    desktop/tauri/src-tauri/target/release/bundle/nsis/
+
+It installs for the current user, so it needs no administrator rights, and it
+carries its own Node runtime — whoever installs it needs nothing else.
+
+TO CHECK THE PACKAGING WITHOUT BUILDING AN INSTALLER
+
+This works on any operating system and is useful for inspection:
+
+    npm run desktop:stage
+
+It stages everything the installer would contain and stops before the
+bundler.
+
+WHAT HAPPENS WHEN SOMEONE RUNS THE INSTALLED APPLICATION
+
+  First launch     A setup window appears. It checks the computer, installs
+                   only the components that are missing, recommends a local
+                   model and asks before downloading it, then verifies each
+                   step. Setup is marked complete only after verification.
+                   If a step fails, it says so and offers Try again — and
+                   for the optional pieces, Continue without it.
+
+  Later launches   The app opens straight away, roughly a second. No
+                   hardware probing, no downloads, no setup screen.
+
+  Interrupted      An unfinished download is recorded as unfinished. The next
+                   launch continues it rather than starting over.
+
+NOT VERIFIED HERE: the Windows installer itself was not built in this
+environment, which has no Windows toolchain. It is built in CI by
+.github/workflows/desktop-release.yml on windows-latest. Also note the
+installer is unsigned, so Windows SmartScreen will warn until it is signed.
+
+BUILDING THE ANDROID APK (needs JDK 21 and the Android SDK)
+
+    WG_REMOTE_URL=https://your-deployment.example.com npm run build:android
+
+The address must be https://. The APK is a client to a deployment; it does
+not run the server itself.
+
+
+--------------------------------------------------------------------------------
+8. STOPPING THE APPLICATION
+--------------------------------------------------------------------------------
+
+Development or production mode:
+    Press Ctrl+C in the terminal running it.
+
+If a port is still in use afterwards, a server process was left behind:
+
+    macOS / Linux:   pkill -f next-server
+    Windows:         taskkill /F /IM node.exe
+
+Packaged Windows application:
+    Close the window. The server stops with it.
+
+Your projects and database are not affected by stopping the application.
+
+
+--------------------------------------------------------------------------------
+9. COMMON PROBLEMS
+--------------------------------------------------------------------------------
+
+"npm run lint" fails with "no such directory: .../lint"
+    Expected. See the note in section 6. Use `npm run typecheck`.
+
+Port 3000 (or 3100) is already in use
+    Something else is on that port, or an old server is still running.
+    Use another port:            npx next start -p 3200
+    Or stop the old one:         see section 8.
+
+A test in Group C fails immediately or cannot connect
+    The application is not running on port 3100. Start it in a second
+    terminal first — see Group C in section 6.
+
+"Ollama not running" during setup
+    Not a problem. It is optional. The app works without it.
+
+The design catalogue is not being used / designs look generic
+    Python 3 is probably missing. Install it and run `npm run setup` again.
+
+No AI research or translation
+    No GEMINI_API_KEY is set. The app still generates a full website from
+    what you type. Add the key to .env.local to turn those features on.
+
+"Cannot find module 'better-sqlite3'" after switching Node versions
+    Native modules are built for one Node version. Reinstall:
+        rm -rf node_modules
+        npm install
+
+I want to start from a clean database
+    Stop the app, then delete the data folder (this deletes your projects):
+        rm -rf data
+    It is recreated empty on the next start.
+
+
+--------------------------------------------------------------------------------
+10. WHERE TO READ MORE
+--------------------------------------------------------------------------------
+
+  docs/GETTING-STARTED.md   Using the app, in plain English, for non-developers
+  docs/DESKTOP.md           The Windows application and its first-launch setup
+  docs/PACKAGING.md         What ships in the installer and the APK
+  docs/PREVIEW.md           How the live preview works
+  docs/READINESS.md         The readiness and performance scores
+  README.md                 How the whole system is put together
+
+================================================================================
