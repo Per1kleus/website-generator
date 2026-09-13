@@ -70,7 +70,16 @@ because a session cookie over plain http would be worse than not shipping.
 # Windows installer  (run on Windows, with Rust + the Tauri prerequisites)
 npm ci
 npm run build:windows
-#   → desktop/tauri/src-tauri/target/release/bundle/nsis/*.exe
+#   → desktop/tauri/src-tauri/target/release/bundle/nsis/WebsiteGenerator-Setup.exe
+
+# The same installer, built from Linux or macOS. Additionally needs the Rust
+# Windows target, cargo-xwin and makensis; cargo-xwin fetches the MSVC CRT and
+# the Windows SDK from Microsoft the first time, so it needs to reach them.
+#   rustup target add x86_64-pc-windows-msvc
+#   cargo install --locked cargo-xwin
+#   apt-get install nsis          (or the equivalent for your system)
+npm run build:windows:cross
+#   → desktop/tauri/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/
 
 # Stage everything without bundling — works anywhere, useful for inspection
 npm run desktop:stage

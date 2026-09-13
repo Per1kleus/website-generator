@@ -14,12 +14,20 @@
  * Nothing secret is staged. API keys and OAuth credentials are the user's own
  * and live in their OS profile, never in the installer.
  *
- *   node scripts/build-desktop.mjs [--no-bundle]
+ * The installer is written as WebsiteGenerator-Setup.exe.
+ *
+ *   node scripts/build-desktop.mjs [--no-bundle] [--target <rust triple>]
+ *
+ * `--target` builds for another platform than this one — the Windows
+ * installer from a Linux machine, say — which additionally needs the Rust
+ * Windows target, cargo-xwin and makensis. Without it the build is for this
+ * machine, exactly as before.
  */
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   chmodSync, copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, readdirSync,
-  readlinkSync, rmSync, writeFileSync,
+  readlinkSync, renameSync, rmSync, statSync, writeFileSync,
 } from "node:fs";
 import path from "node:path";
 import process from "node:process";
@@ -27,21 +35,44 @@ import process from "node:process";
 const ROOT = process.cwd();
 const TAURI = path.join(ROOT, "desktop", "tauri", "src-tauri");
 const STANDALONE = path.join(ROOT, ".next", "standalone");
+const CACHE = path.join(ROOT, "desktop", "tauri", ".cache");
+
+/**
+ * The installer's filename.
+ *
+ * Tauri names it after the product and version. This is the name a person is
+ * told to download and double-click, so it is fixed and boring on purpose.
+ */
+const INSTALLER_NAME = "WebsiteGenerator-Setup.exe";
 
 /** Windows ships npm and npx as .cmd shims; execFileSync uses no shell. */
 const bin = (name) => (process.platform === "win32" ? `${name}.cmd` : name);
 const run = (cmd, args, opts = {}) =>
   execFileSync(bin(cmd), args, { stdio: "inherit", cwd: ROOT, ...opts });
 
-/** Tauri names sidecar binaries by target triple. */
-function targetTriple() {
-  if (process.env.WG_TARGET_TRIPLE) return process.env.WG_TARGET_TRIPLE;
+/** The machine this build is running on. */
+function hostTriple() {
   try {
     const out = execFileSync("rustc", ["-vV"], { encoding: "utf8" });
     return out.match(/^host:\s*(.+)$/m)?.[1]?.trim() ?? "";
   } catch {
     return "";
   }
+}
+
+/**
+ * The machine this build is *for*.
+ *
+ * Normally the same one. `--target` (or WG_TARGET_TRIPLE) names another, which
+ * is how a Windows installer is produced from a Linux machine: Rust already
+ * knows how to emit Windows objects, and everything else staged here — the
+ * server, npm, the icons — is platform-independent JavaScript and data. The
+ * one piece that is not is the Node runtime, and that is handled below.
+ */
+function targetTriple() {
+  const flag = process.argv.indexOf("--target");
+  if (flag >= 0 && process.argv[flag + 1]) return process.argv[flag + 1];
+  return process.env.WG_TARGET_TRIPLE || hostTriple();
 }
 
 console.log("→ Building the application server…");
@@ -173,12 +204,77 @@ if (!triple) {
   console.error("Could not determine the Rust target triple. Is the Rust toolchain installed?");
   process.exit(1);
 }
+const host = hostTriple();
+const cross = Boolean(host) && triple !== host;
+const targetIsWindows = triple.includes("windows");
+
+/**
+ * Fetch the official Node build for another platform.
+ *
+ * `process.execPath` is this machine's Node, and on a cross-build it is the
+ * wrong architecture entirely — an installer carrying it would install
+ * cleanly and then fail to start, which is the worst possible time to find
+ * out. So the runtime for the target comes from nodejs.org, at the same
+ * version this build was made and tested with, and its checksum is compared
+ * against the release's own SHASUMS256.txt before it is used.
+ */
+async function fetchNodeFor(platform, arch) {
+  const version = process.version; // e.g. v22.22.2
+  const name = `node-${version}-${platform}-${arch}`;
+  const exe = platform === "win" ? "node.exe" : "node";
+  const cached = path.join(CACHE, `${name}-${exe}`);
+  if (existsSync(cached) && statSync(cached).size > 1_000_000) {
+    console.log(`   using the cached ${version} ${platform}-${arch} runtime`);
+    return cached;
+  }
+
+  const base = `https://nodejs.org/dist/${version}`;
+  const url = `${base}/${platform}-${arch}/${exe}`;
+  console.log(`   downloading ${url}`);
+  const [payload, sums] = await Promise.all([
+    fetch(url).then((r) => {
+      if (!r.ok) throw new Error(`${url} returned ${r.status}`);
+      return r.arrayBuffer();
+    }),
+    fetch(`${base}/SHASUMS256.txt`).then((r) => {
+      if (!r.ok) throw new Error(`could not read the checksums for ${version}`);
+      return r.text();
+    }),
+  ]);
+
+  const want = sums
+    .split("\n")
+    .map((line) => line.trim().split(/\s+/))
+    .find(([, file]) => file === `${platform}-${arch}/${exe}`)?.[0];
+  if (!want) throw new Error(`${version} publishes no ${platform}-${arch}/${exe}`);
+
+  const body = Buffer.from(payload);
+  const got = createHash("sha256").update(body).digest("hex");
+  if (got !== want) {
+    throw new Error(`the downloaded runtime does not match its published checksum`);
+  }
+
+  mkdirSync(CACHE, { recursive: true });
+  writeFileSync(cached, body);
+  console.log(`   checksum verified (${(body.length / 1e6).toFixed(0)} MB)`);
+  return cached;
+}
+
 const binaries = path.join(TAURI, "binaries");
 mkdirSync(binaries, { recursive: true });
-const suffix = process.platform === "win32" ? ".exe" : "";
+// Tauri names sidecars by target triple, and the extension follows the target
+// rather than the machine doing the building.
+const suffix = targetIsWindows ? ".exe" : "";
 const sidecarPath = path.join(binaries, `wg-node-${triple}${suffix}`);
-copyFileSync(process.execPath, sidecarPath);
-if (process.platform !== "win32") chmodSync(sidecarPath, 0o755);
+
+if (cross) {
+  const arch = triple.startsWith("aarch64") ? "arm64" : "x64";
+  const platform = targetIsWindows ? "win" : triple.includes("darwin") ? "darwin" : "linux";
+  copyFileSync(await fetchNodeFor(platform, arch), sidecarPath);
+} else {
+  copyFileSync(process.execPath, sidecarPath);
+}
+if (!targetIsWindows) chmodSync(sidecarPath, 0o755);
 console.log(`   ${path.basename(sidecarPath)}`);
 
 
@@ -188,5 +284,45 @@ if (process.argv.includes("--no-bundle")) {
 }
 
 console.log("→ Bundling the Windows installer…");
-run("npx", ["tauri", "build"], { cwd: path.join(ROOT, "desktop", "tauri") });
-console.log("\nDone. The installer is under desktop/tauri/src-tauri/target/release/bundle/nsis/");
+const tauriArgs = ["tauri", "build"];
+if (cross) {
+  // Documented Tauri cross-compilation: Rust emits the Windows binary through
+  // cargo-xwin, and the NSIS bundler runs against the system makensis.
+  tauriArgs.push("--target", triple, "--runner", "cargo-xwin");
+}
+run("npx", tauriArgs, { cwd: path.join(ROOT, "desktop", "tauri") });
+
+/**
+ * Give the installer the name people are told to look for.
+ *
+ * Tauri names it "<product>_<version>_<arch>-setup.exe". That is a fine name
+ * for a build artefact and a poor one for a download link, and the difference
+ * matters more than it looks: the filename is the first thing a person sees
+ * and the thing they search their downloads folder for later.
+ */
+const bundleDir = path.join(
+  TAURI, "target", ...(cross ? [triple] : []), "release", "bundle", "nsis",
+);
+if (existsSync(bundleDir)) {
+  const built = readdirSync(bundleDir).filter((f) => f.endsWith(".exe") && f !== INSTALLER_NAME);
+  for (const file of built) {
+    renameSync(path.join(bundleDir, file), path.join(bundleDir, INSTALLER_NAME));
+    // The .sig beside it names the file it signs; keep the pair together.
+    if (existsSync(path.join(bundleDir, `${file}.sig`))) {
+      renameSync(
+        path.join(bundleDir, `${file}.sig`),
+        path.join(bundleDir, `${INSTALLER_NAME}.sig`),
+      );
+    }
+    console.log(`   ${file} → ${INSTALLER_NAME}`);
+  }
+  const installer = path.join(bundleDir, INSTALLER_NAME);
+  if (existsSync(installer)) {
+    const mb = (statSync(installer).size / 1e6).toFixed(1);
+    console.log(`\nDone. ${path.relative(ROOT, installer)} (${mb} MB)`);
+    process.exit(0);
+  }
+}
+
+console.error("\nThe bundler finished but produced no installer.");
+process.exit(1);

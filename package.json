@@ -18,6 +18,7 @@
     "test:desktop": "node scripts/desktop-qa.mjs",
     "desktop:stage": "node scripts/build-desktop.mjs --no-bundle",
     "build:windows": "node scripts/build-desktop.mjs",
+    "build:windows:cross": "node scripts/build-desktop.mjs --target x86_64-pc-windows-msvc",
     "desktop:dev": "npm run build && node desktop/sidecar/launch.mjs",
     "build:android": "node scripts/build-android.mjs",
     "build:android:release": "node scripts/build-android.mjs --release",

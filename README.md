@@ -526,9 +526,10 @@ than a second implementation: the same interface, over the network. It asks for
 the backend address once, or the build bakes it in.
 
 ```bash
-npm run build:windows                                      # → NSIS installer
+npm run build:windows                        # → WebsiteGenerator-Setup.exe
+npm run build:windows:cross                  # the same, built from Linux/macOS
 WG_REMOTE_URL=https://example.com npm run build:android     # → APK
-npm run test:desktop                                        # 36 packaging checks
+npm run test:desktop                                        # 52 packaging checks
 npm run test:setup                                          # 40 first-launch checks
 ```
 

@@ -20,6 +20,7 @@ import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+const ROOT = process.cwd();
 const GOOGLE_PORT = 11811;
 const GOOGLE = `http://127.0.0.1:${GOOGLE_PORT}`;
 
@@ -346,6 +347,76 @@ try {
     stillUp = false;
   }
   record("closing the shell stops the bundled server", !stillUp);
+
+  /* ------------------------------------------------ the Windows installer */
+  console.log("\n=== The Windows installer's contract ===\n");
+
+  // What the installer does on a user's machine cannot be tested from here.
+  // What it is *made of* can, and every one of these is a thing that has gone
+  // wrong in a packaged application before: a private database shipped inside
+  // an installer, a symlink that vanished, a per-machine install that demands
+  // an administrator, a filename nobody can find again in their downloads.
+  const conf = JSON.parse(
+    readFileSync(path.join(ROOT, "desktop/tauri/src-tauri/tauri.conf.json"), "utf8"),
+  );
+  const buildScript = readFileSync(path.join(ROOT, "scripts/build-desktop.mjs"), "utf8");
+  const pkg = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8"));
+
+  record("the installer is still built by Tauri's NSIS bundler",
+    JSON.stringify(conf.bundle?.targets ?? []) === JSON.stringify(["nsis"]),
+    JSON.stringify(conf.bundle?.targets ?? []));
+  record("it installs for the current user, so it never asks for an administrator",
+    conf.bundle?.windows?.nsis?.installMode === "currentUser",
+    conf.bundle?.windows?.nsis?.installMode ?? "unset");
+  record("the installer carries an icon",
+    existsSync(path.join(ROOT, "desktop/tauri/src-tauri",
+      conf.bundle?.windows?.nsis?.installerIcon ?? "")),
+    conf.bundle?.windows?.nsis?.installerIcon ?? "unset");
+  record("the Start Menu entry is named for the product, not the binary",
+    conf.productName === "Website Generator", conf.productName ?? "");
+  record("the app has a stable identifier, so an update replaces it rather than installing beside it",
+    typeof conf.identifier === "string" && conf.identifier.includes("."),
+    conf.identifier ?? "");
+
+  const resources = Object.values(conf.bundle?.resources ?? {});
+  record("the bundled server is a resource of the installer",
+    resources.includes("server/"));
+  record("the sidecar launcher and the first-launch bootstrap ship with it",
+    resources.includes("sidecar/launch.mjs") && resources.includes("bootstrap/"));
+  record("the Node runtime ships as an external binary, so the user installs nothing",
+    (conf.bundle?.externalBin ?? []).includes("binaries/wg-node"));
+
+  record("the installer is written under one fixed, memorable name",
+    buildScript.includes('INSTALLER_NAME = "WebsiteGenerator-Setup.exe"'));
+  record("the build refuses to bundle a symlink rather than shipping a broken one",
+    buildScript.includes("would not survive packaging"));
+  record("the developer's own database and uploads are deleted before packaging",
+    /rmSync\(path\.join\(STANDALONE, "data"\)/.test(buildScript));
+  record("a cross-built runtime is checked against its published checksum",
+    buildScript.includes("does not match its published checksum"));
+  record("both build commands run the one packaging script",
+    pkg.scripts["build:windows"]?.includes("build-desktop.mjs") &&
+      pkg.scripts["build:windows:cross"]?.includes("build-desktop.mjs"));
+
+  // Nothing in the packaging configuration may name a secret. The user's keys
+  // are entered in the application and stored in their own profile; an
+  // installer that carried one would hand it to everyone who downloads it.
+  const packaging = JSON.stringify(conf) + buildScript;
+  const named = ["GEMINI_API_KEY", "GOOGLE_CLIENT_SECRET", "WG_SECRET", "OPENAI", "ANTHROPIC_API_KEY"]
+    .filter((k) => packaging.includes(`${k}=`) || packaging.includes(`"${k}"`));
+  record("no secret is named anywhere in the packaging", named.length === 0, named.join(", "));
+
+  // Only meaningful once something has been staged; skipped rather than
+  // guessed at otherwise.
+  const staged = path.join(ROOT, ".next", "standalone");
+  if (existsSync(path.join(staged, "server.js"))) {
+    record("the staged server carries no data directory",
+      !existsSync(path.join(staged, "data")));
+    record("the staged server carries no .env file",
+      !existsSync(path.join(staged, ".env")) && !existsSync(path.join(staged, ".env.local")));
+  } else {
+    console.log("  (nothing staged — run `npm run desktop:stage` to check the staged tree)");
+  }
 } finally {
   for (const c of children) stop(c);
   rmSync(dataDir, { recursive: true, force: true });

@@ -37,3 +37,6 @@ __pycache__/
 
 # Staged from the local Node install by scripts/build-desktop.mjs.
 /desktop/tauri/npm/
+
+# Node runtimes downloaded for a cross-platform desktop build.
+/desktop/tauri/.cache/

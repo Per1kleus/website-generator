@@ -168,7 +168,7 @@ not, and behaves exactly as it always has. Setup only ever runs from the shell.
 ```bash
 npm ci
 npm run build:windows
-#   → desktop/tauri/src-tauri/target/release/bundle/nsis/*.exe
+#   → desktop/tauri/src-tauri/target/release/bundle/nsis/WebsiteGenerator-Setup.exe
 ```
 
 Requires Windows with Rust and the Tauri prerequisites. The build stages the
@@ -176,6 +176,34 @@ standalone server, the Node runtime, npm (so first-launch setup can install the
 design system), the bootstrap, and optionally an embeddable Python
 (`WG_PYTHON_DIR`). See [PACKAGING.md](PACKAGING.md) for the full build
 reference, the Google Cloud configuration and the environment variables.
+
+The installer is always written as `WebsiteGenerator-Setup.exe`. Tauri names it
+after the product and version; the build renames the file it produced, because
+the filename is what a person is told to download and what they look for in
+their downloads folder a week later.
+
+### From a machine that is not Windows
+
+```bash
+rustup target add x86_64-pc-windows-msvc
+cargo install --locked cargo-xwin
+apt-get install nsis            # or your system's equivalent
+npm run build:windows:cross
+```
+
+This is Tauri's documented cross-compilation path. Two things differ from a
+build on Windows, and both are handled by `scripts/build-desktop.mjs`: the Node
+runtime that ships in the installer is downloaded from nodejs.org for the
+target platform — at the same version this repository is tested with, and
+checked against the release's own `SHASUMS256.txt` — rather than copied from
+the building machine, where it would be the wrong architecture entirely; and
+`cargo-xwin` fetches the MSVC C runtime and the Windows SDK from Microsoft the
+first time it runs, so the build needs to reach `aka.ms` and
+`download.visualstudio.microsoft.com`.
+
+A cross-built installer is still a real installer, but it has not been run on
+Windows by the machine that made it. `.github/workflows/desktop-release.yml`
+builds on `windows-latest`, and that is the artefact to ship.
 
 ## Limitations, stated plainly
 

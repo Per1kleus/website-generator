@@ -210,7 +210,7 @@ GROUP B — start their own server automatically. Just run them:
     npm run test:menu              (47 checks)
     npm run test:gemini            (75 checks)
     npm run test:setup             (40 checks)
-    npm run test:desktop           (36 checks)
+    npm run test:desktop           (52 checks)
 
 GROUP C — need the application ALREADY RUNNING on port 3100.
 
