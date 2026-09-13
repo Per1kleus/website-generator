@@ -297,10 +297,23 @@ WHAT HAPPENS WHEN SOMEONE RUNS THE INSTALLED APPLICATION
   Interrupted      An unfinished download is recorded as unfinished. The next
                    launch continues it rather than starting over.
 
-NOT VERIFIED HERE: the Windows installer itself was not built in this
-environment, which has no Windows toolchain. It is built in CI by
-.github/workflows/desktop-release.yml on windows-latest. Also note the
-installer is unsigned, so Windows SmartScreen will warn until it is signed.
+WHAT WAS AND WAS NOT VERIFIED
+
+An installer was built while writing this guide, cross-compiled from Linux:
+WebsiteGenerator-Setup.exe, 48.3 MB, a real NSIS installer carrying 4,146
+files — the shell, WebView2Loader.dll, the Node runtime, the whole server,
+npm and an uninstaller, with no database and no .env file in it.
+
+NOT VERIFIED: nobody has run it on Windows. There is no Windows machine
+here, so the installer has not been clicked through, the app has not been
+launched, and WebView2 has not rendered a page. That build also used the
+GNU toolchain, because this environment cannot reach Microsoft's servers for
+the MSVC runtime; Tauri supports MSVC. Build on Windows, or let CI do it
+(.github/workflows/desktop-release.yml, windows-latest) — that is the
+installer to give to anyone.
+
+Also note the installer is unsigned either way, so Windows SmartScreen will
+warn until it is signed.
 
 BUILDING THE ANDROID APK (needs JDK 21 and the Android SDK)
 

@@ -207,10 +207,31 @@ builds on `windows-latest`, and that is the artefact to ship.
 
 ## Limitations, stated plainly
 
-1. **The `.exe` was not built here.** This container has no MSVC toolchain, so
-   NSIS bundling and WebView2 remain untested. Everything else was tested by
-   compiling the shell and running it: `.github/workflows/desktop-release.yml`
-   builds the installer on `windows-latest`.
+1. **An installer was built here; it has not been run on Windows.** The
+   development container this was written in has no Windows machine to install
+   on, so what can be stated is exactly what was observed:
+
+   - `WebsiteGenerator-Setup.exe` was produced, 48.3 MB, and is a real NSIS
+     self-extracting installer (`PE32 executable (GUI) … Nullsoft Installer`).
+   - It carries 4,146 files, 187.7 MB uncompressed: the shell
+     (`PE32+ executable (GUI) x86-64, for MS Windows`), `WebView2Loader.dll`,
+     the Node runtime as `wg-node.exe`, the standalone server, the sidecar
+     launcher, the bootstrap, npm, and `uninstall.exe`. No `data/` directory
+     and no `.env` file are in it.
+   - The generated `installer.nsi` was read rather than assumed:
+     `RequestExecutionLevel user`, install into `$LOCALAPPDATA\Website Generator`,
+     a Start Menu shortcut, a desktop shortcut offered on the finish page, a
+     "run now" finish option, `WriteUninstaller`, and the application data
+     directory removed only when the person ticks the box for it.
+   - It was **cross-compiled from Linux against the `windows-gnu` target**,
+     because this container cannot reach Microsoft's hosts for the MSVC C
+     runtime that `cargo-xwin` needs. Tauri supports MSVC on Windows; the GNU
+     ABI is not its supported configuration, and nothing here has launched the
+     result, clicked through the installer, or seen WebView2 render a page.
+
+   So: a genuine artefact, and not a substitute for the supported one.
+   `.github/workflows/desktop-release.yml` builds on `windows-latest` with
+   MSVC, and that is the installer to ship.
 2. **Ollama's Windows installation could not be exercised here.** winget is the
    primary path and is silent; without it the vendor's own installer is
    downloaded and run visibly, because inventing silent flags for a third-party
