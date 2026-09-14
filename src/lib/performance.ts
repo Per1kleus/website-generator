@@ -17,6 +17,7 @@ import type { ImagePlacement, Site } from "./site";
 
 export type PerfCategoryId =
   | "images"
+  | "mobile"
   | "weight"
   | "critical"
   | "stability"
@@ -65,6 +66,13 @@ export type PerfReport = {
     priorityImages: number;
     imagesWithDimensions: number;
     heroPreloaded: boolean;
+    /**
+     * Photograph bytes a 390px phone would download, from the widths the page
+     * offers and the sizes on disk. Static analysis, never a real page load.
+     */
+    mobileImageBytes: number;
+    /** How many images offer more than one width. */
+    responsiveImages: number;
   };
 };
 
@@ -97,13 +105,24 @@ const BUDGET = {
   singleImage: 400_000,
   /** A hero can be bigger; it is the one that has to look good full-bleed. */
   heroImage: 600_000,
+  /**
+   * What a phone should download in photographs.
+   *
+   * Deliberately well under the desktop budget: this is the viewport that is
+   * most often on mobile data and least able to afford a wasted megabyte.
+   */
+  mobileImages: 600_000,
   /** Font files are a request each, and each one blocks text. */
   fontWeights: 4,
 } as const;
 
 const CATEGORY_MAX: Record<PerfCategoryId, number> = {
-  images: 30,
-  weight: 20,
+  images: 20,
+  // A phone is where these sites are read, and the place a heavy page costs
+  // real money. It is weighted accordingly rather than folded into a single
+  // average that a fast desktop can carry.
+  mobile: 15,
+  weight: 15,
   critical: 15,
   stability: 20,
   fonts: 10,
@@ -112,6 +131,7 @@ const CATEGORY_MAX: Record<PerfCategoryId, number> = {
 
 const CATEGORY_LABEL: Record<PerfCategoryId, string> = {
   images: "Image optimisation",
+  mobile: "Mobile payload",
   weight: "Asset weight",
   critical: "Critical resource loading",
   stability: "Layout stability",
@@ -121,6 +141,31 @@ const CATEGORY_LABEL: Record<PerfCategoryId, string> = {
 
 const bytes = (n: number) =>
   n >= 1_000_000 ? `${(n / 1_048_576).toFixed(1)}MB` : `${Math.round(n / 1024)}KB`;
+
+/**
+ * How wide a photograph is actually drawn on a phone.
+ *
+ * The QA viewports this application already uses are 320, 390, 834 and 1440.
+ * 390 is the phone case, and a modern phone screen is about 2× that in device
+ * pixels — so a full-bleed image is drawn at roughly 780, and one in a
+ * two-across gallery at roughly half that. These are the same proportions the
+ * renderer puts in its `sizes` attribute, deliberately: an estimate computed
+ * from different assumptions than the browser uses would not describe what
+ * the browser does.
+ */
+function mobileServedWidth(role: ImagePlacement["role"]): number {
+  switch (role) {
+    case "hero":
+    case "section":
+    case "showcase":
+      return 780;
+    case "gallery":
+    case "supporting":
+      return 390;
+    default:
+      return 400;
+  }
+}
 
 /** The document without its stylesheet or scripts, for counting real tags. */
 function markup(html: string): string {
@@ -182,6 +227,9 @@ export function assessPerformance(input: PerfInput): PerfReport {
     priorityImages: priority.length,
     imagesWithDimensions: sized.length,
     heroPreloaded,
+    // Filled in by the mobile block below, which needs the image tags first.
+    mobileImageBytes: 0,
+    responsiveImages: 0,
   };
 
   /* ------------------------------------------------------------ images */
@@ -249,6 +297,69 @@ export function assessPerformance(input: PerfInput): PerfReport {
         issue: "No photograph has a measured focal point, so every crop falls back to the centre.",
         correction: "Re-upload them; the focal point is measured once, at upload.",
         cost: 0,
+      });
+    }
+  }
+
+  /* ------------------------------------------------------------ mobile */
+
+  /**
+   * What a phone actually downloads.
+   *
+   * This is static analysis, not a measurement of a real load — the number is
+   * derived from the bytes on disk and the markup, and it is labelled as such
+   * everywhere it is shown. What makes it worth having is that the estimate
+   * follows the same rule the browser does: with a `srcset` and a `sizes`, a
+   * 390px viewport at 2× picks roughly the 780px rung, and the bytes scale
+   * with area. Without one, it downloads the original, whatever its size.
+   */
+  if (hasImages) {
+    const responsive = imgTags.filter((t) => /\bsrcset=/.test(t));
+    const mobileBytes = perImage.reduce((sum, { placement, size }) => {
+      if (!size.bytes) return sum;
+      const served = mobileServedWidth(placement.role);
+      // No variants offered, or the file is already narrower than the phone
+      // needs: the whole thing comes down.
+      if (!responsive.length || size.width <= served) return sum + size.bytes;
+      // WebP scales with pixel count rather than linearly with width, so area
+      // is the right ratio. A floor keeps the estimate honest for small files,
+      // where headers and the format's own overhead dominate.
+      const ratio = (served * served) / (size.width * size.width);
+      return sum + Math.max(6_000, Math.round(size.bytes * ratio));
+    }, 0);
+
+    measured.mobileImageBytes = mobileBytes;
+    measured.responsiveImages = responsive.length;
+
+    if (!responsive.length && placements.length) {
+      add({
+        id: "no-responsive-images",
+        category: "mobile",
+        level: "warning",
+        issue: `A phone downloads the full-size photographs — about ${bytes(imageBytes)} — because the page offers only one width of each.`,
+        correction: "Re-generate the site; the renderer offers several widths and lets the browser choose.",
+        cost: 10,
+      });
+    } else if (responsive.length < imgTags.length) {
+      add({
+        id: "partly-responsive-images",
+        category: "mobile",
+        level: "warning",
+        issue: `${imgTags.length - responsive.length} of ${imgTags.length} images are served at a single width.`,
+        correction: "Those images have no recorded size, so no narrower copy could be offered. Re-upload them.",
+        cost: 3,
+      });
+    }
+
+    if (mobileBytes > BUDGET.mobileImages) {
+      const over = mobileBytes - BUDGET.mobileImages;
+      add({
+        id: "mobile-payload-heavy",
+        category: "mobile",
+        level: "warning",
+        issue: `A phone downloads about ${bytes(mobileBytes)} of photographs, which is ${bytes(over)} over budget.`,
+        correction: "Use fewer photographs on the page, or re-upload the largest ones smaller.",
+        cost: Math.min(8, 2 + Math.round(over / 200_000) * 2),
       });
     }
   }
@@ -415,7 +526,9 @@ export function assessPerformance(input: PerfInput): PerfReport {
   /* ------------------------------------------------------------- score */
 
   const categories: PerfCategory[] = (Object.keys(CATEGORY_MAX) as PerfCategoryId[]).map((id) => {
-    const notApplicable = id === "images" && !hasImages;
+    // Neither category can be judged on a site with no photographs, and a
+    // full mark for work that was never required would be an invented pass.
+    const notApplicable = (id === "images" || id === "mobile") && !hasImages;
     const spent = findings.filter((f) => f.category === id).reduce((sum, f) => sum + f.cost, 0);
     return {
       id,

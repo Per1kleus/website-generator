@@ -12,6 +12,7 @@ import { MenuDataCard } from "@/components/MenuDataCard";
 import { VisualQaCard } from "@/components/VisualQaCard";
 import { SitePreview } from "@/components/SitePreview";
 import { ReadinessCard } from "@/components/ReadinessCard";
+import { PerformanceCard } from "@/components/PerformanceCard";
 import { ProjectOverview, type Figure } from "@/components/ProjectOverview";
 import { getMenuSource } from "@/server/menu/source";
 import { AppBar, Banner, Card, LinkButton } from "@/components/ui";
@@ -205,6 +206,14 @@ export default async function ProjectPage({
           <DesignQuestions projectId={id} questions={questions} />
 
           {readiness && <ReadinessCard report={readiness} projectId={id} />}
+
+          {/* The readiness report already computed this; showing it is a
+              second view of the same object, not a second analysis. */}
+          {readiness?.performance && (
+            <div className="my-4">
+              <PerformanceCard report={readiness.performance} />
+            </div>
+          )}
 
           {qa && <VisualQaCard report={qa} corrections={identity?.qa?.applied ?? []} />}
 

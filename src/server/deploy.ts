@@ -5,7 +5,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { db } from "./db";
 import type { Site } from "@/lib/site";
-import { buildBundle } from "./bundle";
+import { buildBundle, resizedBytes } from "./bundle";
 
 /**
  * Deployment from a phone (requirement 13).
@@ -157,6 +157,8 @@ async function runDeployment(
       await mkdir(path.dirname(dest), { recursive: true });
       if (file.kind === "text") {
         await writeFile(dest, file.content, "utf8");
+      } else if (file.kind === "resize") {
+        if (existsSync(file.source)) await writeFile(dest, await resizedBytes(file));
       } else if (existsSync(file.source)) {
         await copyFile(file.source, dest);
         images += 1;
@@ -289,7 +291,9 @@ export async function refreshDeployment(projectId: string, site: Site): Promise<
       const dest = path.join(target, file.name);
       await mkdir(path.dirname(dest), { recursive: true });
       if (file.kind === "text") await writeFile(dest, file.content, "utf8");
-      else if (existsSync(file.source)) await copyFile(file.source, dest);
+      else if (file.kind === "resize") {
+        if (existsSync(file.source)) await writeFile(dest, await resizedBytes(file));
+      } else if (existsSync(file.source)) await copyFile(file.source, dest);
     }
     return deployment.url;
   } catch (err) {

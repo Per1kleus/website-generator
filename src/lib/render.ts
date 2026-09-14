@@ -1,6 +1,7 @@
 import { architecture, RHYTHM_SPACING, type DesignArchitecture } from "./architectures";
 import { readableOn } from "./contrast";
 import { localeInfo, type Locale } from "./locales";
+import { sizesFor, srcsetFor } from "./responsive-images";
 import { fontStack, key, t, type ImageRole, type Section, type SectionLayout, type Site } from "./site";
 import { tokensForArchitecture } from "./tokens";
 import { buildStructuredData } from "./seo";
@@ -52,8 +53,11 @@ function safeHref(raw: string): string {
 export type RenderOptions = {
   /** Which language to render. Defaults to the site's default locale. */
   locale?: Locale;
-  /** Maps an asset id to a URL. Preview uses API URLs; export uses relative. */
-  assetUrl?: (id: string) => string;
+  /**
+   * Maps an asset id to a URL. Preview uses API URLs; export uses relative.
+   * `width` asks for a responsive variant; absent means the original.
+   */
+  assetUrl?: (id: string, width?: number) => string;
   /** Where the switcher and hreflang point for a given locale. */
   localeHref?: (locale: Locale) => string;
   /** Absolute site origin, needed for canonical/OG URLs. */
@@ -62,9 +66,10 @@ export type RenderOptions = {
   canonical?: string;
 };
 
-function imageUrl(id: string, opts: RenderOptions): string | null {
+function imageUrl(id: string, opts: RenderOptions, width?: number): string | null {
   if (!id) return null;
-  return (opts.assetUrl ? opts.assetUrl(id) : `/api/assets/${id}`) || null;
+  if (opts.assetUrl) return opts.assetUrl(id, width) || null;
+  return (width ? `/api/assets/${id}?w=${width}` : `/api/assets/${id}`) || null;
 }
 
 
@@ -668,7 +673,12 @@ function navLinks(site: Site, locale: Locale): { href: string; label: string }[]
  * band keeps its subject. Priority only at the top of the page; everything
  * else is lazy.
  */
-function imageAttrs(site: Site, assetId: string, fallbackRole: ImageRole): {
+function imageAttrs(
+  site: Site,
+  assetId: string,
+  fallbackRole: ImageRole,
+  opts: RenderOptions,
+): {
   attrs: string;
   style: string;
   ratioClass: string;
@@ -683,8 +693,18 @@ function imageAttrs(site: Site, assetId: string, fallbackRole: ImageRole): {
       : "";
   const priority = placement?.priority ?? role === "hero";
 
+  // Offer the browser the widths that exist and tell it how much of the
+  // viewport this image will occupy; it does the choosing, accounting for
+  // device pixel ratio. Without `sizes` a browser assumes 100vw and picks
+  // too large a file for anything that is not full-bleed.
+  const original = imageUrl(assetId, opts) ?? "";
+  const srcset = srcsetFor(width, (w) => imageUrl(assetId, opts, w) ?? original, original);
+  const responsive = srcset
+    ? ` srcset="${esc(srcset)}" sizes="${esc(sizesFor(role))}"`
+    : "";
+
   return {
-    attrs: `width="${width}" height="${height}" ${
+    attrs: `width="${width}" height="${height}"${responsive} ${
       priority ? 'fetchpriority="high" decoding="async"' : 'loading="lazy" decoding="async"'
     }`,
     style: focal,
@@ -702,7 +722,7 @@ function renderSection(s: Section, site: Site, locale: Locale, opts: RenderOptio
   switch (s.type) {
     case "hero": {
       const img = imageUrl(s.imageId, opts);
-      const heroImg = img ? imageAttrs(site, s.imageId, "hero") : null;
+      const heroImg = img ? imageAttrs(site, s.imageId, "hero", opts) : null;
       const media = img && heroImg
         ? `<div class="media hero-media ${heroImg.ratioClass}"><img src="${esc(img)}" alt="${esc(
             t(site, locale, key.section(s.id, "imageAlt")) || t(site, locale, key.meta("logoAlt")) || "",
@@ -726,7 +746,7 @@ ${media}
       const body = str("body").split(/\n{2,}/).filter(Boolean);
       const layout = s.layout ?? "editorial";
       const prose = body.map((p) => `<p>${esc(p)}</p>`).join("");
-      const aboutImg = img ? imageAttrs(site, s.imageId, "section") : null;
+      const aboutImg = img ? imageAttrs(site, s.imageId, "section", opts) : null;
       const media = img && aboutImg
         ? `<div class="media hero-media ${aboutImg.ratioClass}"><img src="${esc(img)}" alt="${esc(
             t(site, locale, key.section(s.id, "imageAlt")),
@@ -852,7 +872,7 @@ ${desc ? `<p class="desc">${esc(desc)}</p>` : ""}
       const layout = s.layout ?? "grid";
       const figures = imgs
         .map((im) => {
-          const meta = imageAttrs(site, im.id, "gallery");
+          const meta = imageAttrs(site, im.id, "gallery", opts);
           return `<figure class="${meta.ratioClass}"><img src="${esc(im.url)}" alt="${esc(
             row(im.id, "alt"),
           )}" ${meta.attrs} style="${meta.style}"></figure>`;

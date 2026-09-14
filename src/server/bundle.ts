@@ -1,9 +1,12 @@
 import "server-only";
 import { existsSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
+import sharp from "sharp";
 import type { Locale } from "@/lib/locales";
 import { renderRobots, renderSite, renderSitemap } from "@/lib/render";
 import type { Site } from "@/lib/site";
+import { variantsFor } from "@/lib/responsive-images";
 import { UPLOAD_DIR } from "./db";
 
 /**
@@ -24,7 +27,16 @@ import { UPLOAD_DIR } from "./db";
 
 export type BundleFile =
   | { kind: "text"; name: string; content: string }
-  | { kind: "file"; name: string; source: string };
+  | { kind: "file"; name: string; source: string }
+  /**
+   * A narrower copy of `source`, to be produced when the bundle is written.
+   *
+   * The resize itself is deliberately not done here: `buildBundle` is
+   * synchronous and pure, which is what lets the preview endpoint and the
+   * publisher be compared byte for byte. So the intent is described and the
+   * three writers — publish, re-publish and export — carry it out.
+   */
+  | { kind: "resize"; name: string; source: string; width: number };
 
 export function imageIdsFor(site: Site): string[] {
   const ids = new Set<string>();
@@ -58,7 +70,7 @@ export function buildBundle(site: Site, baseUrl?: string): BundleFile[] {
 
     const html = renderSite(site, {
       locale,
-      assetUrl: (id) => `../images/${id}.webp`,
+      assetUrl: (id, width) => `../images/${id}${width ? `-${width}` : ""}.webp`,
       localeHref: abs ? (l) => localeUrl(l) : localeHref,
       canonical: abs ? localeUrl(locale) : undefined,
       baseUrl: abs,
@@ -124,10 +136,32 @@ carries its own metadata, canonical URL and hreflang links.
 
   for (const id of imageIdsFor(site)) {
     const source = path.join(UPLOAD_DIR, `${id}.webp`);
-    if (existsSync(source)) files.push({ kind: "file", name: `images/${id}.webp`, source });
+    if (!existsSync(source)) continue;
+    files.push({ kind: "file", name: `images/${id}.webp`, source });
+
+    // The same ladder the pages ask for in their srcset. Only placed images
+    // have a recorded natural width; anything else ships as itself, which is
+    // what the markup asks for too.
+    const natural = site.images?.find((p) => p.assetId === id)?.width ?? 0;
+    for (const width of variantsFor(natural)) {
+      files.push({ kind: "resize", name: `images/${id}-${width}.webp`, source, width });
+    }
   }
 
   return files;
+}
+
+/**
+ * The bytes for one resized variant.
+ *
+ * One implementation, shared by every writer, so a published site and an
+ * exported ZIP cannot disagree about what a 780px copy of a photograph is.
+ */
+export async function resizedBytes(file: { source: string; width: number }): Promise<Buffer> {
+  return sharp(await readFile(file.source))
+    .resize({ width: file.width })
+    .webp({ quality: 76 })
+    .toBuffer();
 }
 
 function escapeHtml(s: string): string {

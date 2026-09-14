@@ -148,7 +148,8 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
   try {
     const html = renderSite(site, {
       locale,
-      assetUrl: (assetId) => `/api/assets/${assetId}?pt=${encodeURIComponent(pt)}`,
+      assetUrl: (assetId, width) =>
+        `/api/assets/${assetId}?${width ? `w=${width}&` : ""}pt=${encodeURIComponent(pt)}`,
       // Switching language inside the preview navigates back to this same
       // endpoint, so the visitor-facing switcher is exercised for real rather
       // than mocked.
