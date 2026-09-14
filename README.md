@@ -178,6 +178,14 @@ page may be: evidence about a business, never an instruction. Nothing in this
 process ever opens a connection to it and nothing on it is executed; the page
 is fetched by Google's grounding infrastructure and only its text comes back.
 
+One thing is deliberately not taken from it: its photographs. Image
+intelligence works on files the creator uploaded, and downloading pictures
+from a website is a copyright decision rather than a technical one — the
+business may not own what is on its own current site, and a generator that
+quietly copies images across makes that decision on the owner's behalf. So
+the existing site contributes facts and cues about its photography, and the
+creator uploads the photographs themselves, exactly as they do today.
+
 It is a source, not a template. The design, the section order and the copy are
 still decided by the systems downstream — the design catalogue, identity
 analysis, the layout engine, the token engine, image intelligence, the SEO
