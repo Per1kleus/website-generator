@@ -67,13 +67,14 @@ the project screen renders the site as it currently stands and scores that.
 
 ## Performance
 
-`lib/performance.ts` measures six things, all of them properties of what is
+`lib/performance.ts` measures seven things, all of them properties of what is
 about to be shipped:
 
 | Category | Points | Measured from |
 | --- | ---: | --- |
-| Image optimisation | 30 | Per-image bytes against a per-role budget, oversized sources, priority and lazy hints |
-| Asset weight | 20 | Document and image bytes against a page budget |
+| Image optimisation | 20 | Per-image bytes against a per-role budget, oversized sources, priority and lazy hints |
+| Mobile payload | 15 | What a 390px viewport would download, given the widths each image offers |
+| Asset weight | 15 | Document and image bytes against a page budget |
 | Critical resource loading | 15 | Hero preload, render-blocking stylesheets, external scripts |
 | Layout stability | 20 | Width/height on every image, aspect ratios, `display=swap` |
 | Font efficiency | 10 | Weights requested against weights the tokens set, request count, preconnect |
@@ -83,10 +84,36 @@ A category that does not apply — image optimisation on a site with no
 photographs — is removed from the denominator rather than given away, so the
 score is out of the points that site could actually earn.
 
-### The two optimisations in the renderer
+### Measured, and predicted
 
-Measuring is not enough on its own, so `lib/render.ts` does two things the
+These are two different kinds of claim and the application never blurs them.
+
+**Measured** is a fact about the files: bytes of markup and generated CSS,
+bytes of each photograph on disk, the dimensions recorded at upload, the
+loading attributes the renderer emitted, the font weights requested.
+
+**Predicted** is one number — what a phone would download — worked out from
+those facts and from the widths each image offers, following the same rule a
+browser follows: at 390 CSS pixels and roughly 2× density a full-bleed image
+is drawn near 780px, one in a two-across gallery near 390px, and WebP bytes
+scale with area rather than with width. No page is loaded and no browser is
+involved. It is not a Lighthouse result and every screen showing it says so.
+
+Without a `srcset` the prediction is the full file, because that is what the
+browser would actually fetch — which is why responsive delivery is worth most
+of this category.
+
+### The three optimisations in the renderer
+
+Measuring is not enough on its own, so `lib/render.ts` does three things the
 measurements then confirm:
+
+- **Every photograph is offered at several widths.** A fixed ladder — 390,
+  780, 1200, 1600 — with a `sizes` that matches the layout the stylesheet
+  actually emits, so the browser can pick. Never upscaled: a width at or above
+  the file's own is not offered, and an image smaller than the first rung is
+  served as itself. The same widths are produced wherever a site is written
+  out, from one shared implementation.
 
 - **The hero is preloaded.** It is an `<img>` deep in the body behind the
   stylesheet, and it is almost always the largest contentful paint. One

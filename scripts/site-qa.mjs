@@ -40,6 +40,11 @@ const { deriveTokens, readSignals, NEUTRAL_SIGNALS } = await import("../src/lib/
 const { renderSite, renderSitemap, renderRobots } = await import("../src/lib/render.ts");
 const { checkWebsiteUrl, isUsableWebsiteUrl, websiteHost } = await import("../src/lib/website-url.ts");
 const { readProfile } = await import("../src/server/research.ts");
+const { assessPerformance } = await import("../src/lib/performance.ts");
+const { isVariantWidth, sizesFor, srcsetFor, variantsFor } =
+  await import("../src/lib/responsive-images.ts");
+const { addSection, addableSectionTypes, normaliseSection, removeSection } =
+  await import("../src/lib/site.ts");
 
 const PRESET = "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
 const EXEC = process.env.PW_CHROME ?? (existsSync(PRESET) ? PRESET : undefined);
@@ -99,6 +104,13 @@ const contact = () => ({
   phone: "+30 231 000 0000", email: "hello@example.gr", mapsUrl: "", bookingUrl: "",
 });
 const footer = () => ({ id: id("sec"), type: "footer", visible: true, links: [] });
+
+/** An image placement, as the image intelligence stage would record it. */
+const placement = (assetId, role, width, height) => ({
+  assetId, role, width, height, focalX: 0.5, focalY: 0.5,
+  ratio: { desktop: "16/9", mobile: "4/3" },
+  priority: role === "hero",
+});
 
 /** Fill a page with enough real copy that the audit has something to measure. */
 function withCopy(site, { headline = "Warm bread, every morning", ...rest } = {}) {
@@ -726,6 +738,151 @@ async function cornerImage(file, corner, width = 1600, height = 1000) {
   record("an image no longer on the page drops out of the placements",
     syncPlacements({ ...site, sections: site.sections.filter((s) => s.type !== "gallery") }, assets)
       .images.every((p) => p.assetId !== "a"));
+}
+
+/* ======================================================================
+   3b. Responsive images, editing safety, and the mobile payload
+   ====================================================================== */
+
+console.log("\n=== Responsive image delivery ===\n");
+
+{
+  record("the ladder never offers a width the file cannot fill",
+    variantsFor(500).every((w) => w < 500) && variantsFor(390).length === 0,
+    JSON.stringify(variantsFor(500)));
+  record("a big photograph gets the whole ladder",
+    JSON.stringify(variantsFor(3000)) === JSON.stringify([390, 780, 1200, 1600]));
+  record("a width barely under the original is not worth a second file",
+    !variantsFor(1620).includes(1600), JSON.stringify(variantsFor(1620)));
+  record("a nonsense width produces no variants",
+    variantsFor(0).length === 0 && variantsFor(NaN).length === 0);
+
+  record("only the fixed ladder is cacheable",
+    isVariantWidth(780) && !isVariantWidth(781) && !isVariantWidth(200));
+
+  const set = srcsetFor(3000, (w) => `/img?w=${w}`, "/img");
+  record("the srcset describes each candidate by its real width",
+    set === "/img?w=390 390w, /img?w=780 780w, /img?w=1200 1200w, /img?w=1600 1600w, /img 3000w",
+    set);
+  record("the original is offered too, so a dense desktop is not capped",
+    set.endsWith("/img 3000w"));
+  record("a small image gets no srcset at all", srcsetFor(320, (w) => `/x?w=${w}`, "/x") === "");
+
+  record("a full-bleed role claims the whole viewport", sizesFor("hero") === "100vw");
+  record("a gallery role claims a fraction of it",
+    sizesFor("gallery").includes("33vw") && sizesFor("gallery").includes("50vw"));
+  record("every role has a sizes value",
+    ["hero", "section", "gallery", "showcase", "supporting", "menu"]
+      .every((r) => typeof sizesFor(r) === "string" && sizesFor(r).length > 0));
+}
+
+{
+  // The renderer has to actually emit them, against a real document.
+  const site = withCopy(makeSite([hero("a"), about(), gallery(["b", "c"]), contact(), footer()], {
+    name: "Fotos",
+    images: [
+      placement("a", "hero", 3000, 2000),
+      placement("b", "gallery", 1600, 1200),
+      placement("c", "gallery", 900, 700),
+    ],
+  }));
+  const html = renderSite(site, { locale: "en" });
+  // Scan the markup, not the stylesheet: the emitted CSS carries a comment
+  // mentioning an <img> tag, and counting that as an image is exactly the
+  // mistake the production audits strip <style> to avoid.
+  const body = html.replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, "");
+  const tags = [...body.matchAll(/<img\b[^>]*>/gi)].map((m) => m[0]);
+
+  record("every photograph is offered at several widths",
+    tags.length > 0 && tags.every((t) => /srcset=/.test(t)), `${tags.length} images`);
+  record("...each with a sizes attribute", tags.every((t) => /sizes=/.test(t)));
+  record("the hero is still the priority image and the rest are lazy",
+    tags.some((t) => /fetchpriority="high"/.test(t)) &&
+      tags.filter((t) => /loading="lazy"/.test(t)).length >= 1);
+  record("width and height are still emitted, so nothing shifts",
+    tags.every((t) => /width="\d+"/.test(t) && /height="\d+"/.test(t)));
+  record("no variant is wider than its own photograph",
+    tags.every((t) => {
+      const natural = Number(/width="(\d+)"/.exec(t)?.[1] ?? 0);
+      return [...t.matchAll(/[?&]w=(\d+)/g)].every((m) => Number(m[1]) < natural);
+    }));
+}
+
+console.log("\n=== The mobile payload ===\n");
+
+{
+  const site = withCopy(makeSite([hero("a"), gallery(["b"]), contact(), footer()], {
+    name: "Heavy",
+    images: [placement("a", "hero", 3000, 2000), placement("b", "gallery", 2000, 1500)],
+  }));
+  const images = {
+    a: { width: 3000, height: 2000, bytes: 500_000 },
+    b: { width: 2000, height: 1500, bytes: 300_000 },
+  };
+  const responsive = renderSite(site, { locale: "en" });
+  const flat = responsive.replace(/ srcset="[^"]*"/g, "").replace(/ sizes="[^"]*"/g, "");
+
+  const good = assessPerformance({ site, html: responsive, images });
+  const bad = assessPerformance({ site, html: flat, images });
+  const cat = (r) => r.categories.find((c) => c.id === "mobile");
+
+  record("a phone's download is estimated, not guessed at randomly",
+    good.measured.mobileImageBytes > 0 &&
+      good.measured.mobileImageBytes < bad.measured.mobileImageBytes,
+    `${Math.round(good.measured.mobileImageBytes / 1024)}KB vs ${Math.round(bad.measured.mobileImageBytes / 1024)}KB`);
+  record("responsive delivery scores the mobile category full marks",
+    cat(good).score === cat(good).max, `${cat(good).score}/${cat(good).max}`);
+  record("sending one huge width to a phone loses most of them",
+    cat(bad).score < cat(bad).max / 2, `${cat(bad).score}/${cat(bad).max}`);
+  record("...and the creator is told exactly why",
+    bad.findings.some((f) => f.id === "no-responsive-images"));
+  record("the mobile category counts toward the same 100",
+    good.categories.reduce((n, c) => n + (c.notApplicable ? 0 : c.max), 0) <= 100);
+
+  const none = assessPerformance({
+    site: withCopy(makeSite([hero(), contact(), footer()], { name: "Words" })),
+    html: "<html><head><style>a{}</style></head><body></body></html>",
+  });
+  record("a site with no photographs is not marked down for mobile images",
+    cat(none).notApplicable && none.score === 100, `${none.score}/100`);
+
+  record("the same page scores the same twice",
+    assessPerformance({ site, html: responsive, images }).score === good.score);
+}
+
+console.log("\n=== Editing cannot break the document ===\n");
+
+{
+  const site = withCopy(makeSite([hero(), about(), contact(), footer()], { name: "Editable" }));
+
+  const added = addSection(site, "services");
+  record("a new section lands above the footer, never after it",
+    added.sections.at(-1).type === "footer" && added.sections.at(-2).type === "services");
+  record("...is structurally complete, so the renderer can draw it",
+    Array.isArray(added.sections.at(-2).items));
+  record("...and carries a readable title in every language",
+    Boolean(added.i18n.en.strings[`${added.sections.at(-2).id}.title`]));
+  record("the page still renders with it", renderSite(added, { locale: "en" }).includes("<main"));
+
+  record("a second hero cannot be added", !addableSectionTypes(added.sections).includes("hero"));
+  record("a second gallery can be", addableSectionTypes(added.sections).includes("gallery"));
+
+  const removed = removeSection(added, added.sections.at(-2).id);
+  record("removing a section removes it", removed.sections.length === site.sections.length);
+  record("...and takes its strings with it, leaving nothing unreachable",
+    !Object.keys(removed.i18n.en.strings).some((k) => k.startsWith(`${added.sections.at(-2).id}.`)));
+  record("the page still renders without it", renderSite(removed, { locale: "en" }).includes("<main"));
+
+  // The shape a buggy client or a model would send.
+  const broken = normaliseSection({ id: "s_x", type: "services", visible: true });
+  record("a section missing its array is completed rather than trusted",
+    Array.isArray(broken.items) && broken.items.length === 0);
+  const wrongType = normaliseSection({ id: "s_y", type: "gallery", visible: true, imageIds: "nope" });
+  record("a field of the wrong type is replaced, not carried through",
+    Array.isArray(wrongType.imageIds));
+  const kept = normaliseSection({ id: "s_z", type: "contact", visible: false, phone: "+30 1", email: "a@b.c", mapsUrl: "", bookingUrl: "" });
+  record("real values are kept exactly as they were sent",
+    kept.phone === "+30 1" && kept.email === "a@b.c" && kept.visible === false);
 }
 
 /* ======================================================================

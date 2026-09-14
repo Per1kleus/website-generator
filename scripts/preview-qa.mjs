@@ -63,13 +63,15 @@ async function main() {
 
   await page.goto(`${BASE}/projects/new`, { waitUntil: "networkidle" });
   await page.getByLabel("Business name").fill("Thalassa Taverna");
-  await page.getByLabel("What kind of business is it?").fill("Seafood restaurant");
   await page
     .getByLabel("Describe the business")
     .fill("A family seafood taverna on the waterfront, open since 1978. Grilled fish, meze and local wine.");
-  await page.getByRole("button", { name: "Continue" }).click();
+  // This run needs two languages, so it takes the optional steps rather than
+  // generating straight from the first screen.
+  await page.locator("[data-wizard-secondary]").click();
 
   await page.getByLabel("Town or city").fill("Nafplio");
+  await page.getByLabel("What kind of business is it?").fill("Seafood restaurant");
   await page.getByLabel("Phone").fill("+30 2752 000000");
   await page.getByRole("button", { name: "Continue" }).click();
 
@@ -610,7 +612,6 @@ async function main() {
   // A project that was never generated has no document to render.
   await page.goto(`${BASE}/projects/new`, { waitUntil: "networkidle" });
   await page.getByLabel("Business name").fill("Never Generated");
-  await page.getByLabel("What kind of business is it?").fill("Bookshop");
   await page.getByLabel("Describe the business").fill("A second-hand bookshop that has not been generated yet.");
   const blank = await page.evaluate(async () => {
     const res = await fetch("/api/projects", {

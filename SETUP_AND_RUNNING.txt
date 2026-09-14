@@ -201,16 +201,16 @@ matters — some need you to start the application first.
 
 GROUP A — need NOTHING running. Just run them:
 
-    npm run test:site              (237 checks)
+    npm run test:site              (272 checks)
     npm run test:design-systems    (59 checks)
 
 GROUP B — start their own server automatically. Just run them:
 
     npm run test:design            (21 checks)
-    npm run test:menu              (47 checks)
+    npm run test:menu              (61 checks)
     npm run test:gemini            (75 checks)
     npm run test:setup             (40 checks)
-    npm run test:desktop           (52 checks)
+    npm run test:desktop           (55 checks)
 
 GROUP C — need the application ALREADY RUNNING on port 3100.
 
@@ -222,8 +222,8 @@ GROUP C — need the application ALREADY RUNNING on port 3100.
     TERMINAL 2 — run the suite:
 
         npm run test:preview       (60 checks)
-        npm run test:studio        (157 checks)
-        npm run test:mobile        (221 checks)
+        npm run test:studio        (178 checks)
+        npm run test:mobile        (222 checks)
 
     These three default to http://localhost:3100. If your server is on a
     different address, pass it as an argument, for example:

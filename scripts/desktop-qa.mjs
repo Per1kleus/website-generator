@@ -417,16 +417,24 @@ try {
   record("...and never beside the executable",
     !/data_dir\s*=\s*resources/.test(shell));
 
-  // Only meaningful once something has been staged; skipped rather than
-  // guessed at otherwise.
+  // The developer's own database appears in the standalone tree as soon as
+  // that server is run — its working directory is the tree itself — so its
+  // presence here says nothing. What matters is that the packaging script
+  // deletes it *after* building and before bundling, which is an ordering
+  // this can actually check.
+  const buildAt = buildScript.indexOf('run("npx", ["next", "build"])');
+  const deleteAt = buildScript.indexOf('rmSync(path.join(STANDALONE, "data")');
+  record("the packaging script builds before it clears the data directory",
+    buildAt >= 0 && deleteAt > buildAt);
+  record("...and clears it before the bundler runs",
+    deleteAt < buildScript.indexOf('"→ Bundling'));
+
   const staged = path.join(ROOT, ".next", "standalone");
   if (existsSync(path.join(staged, "server.js"))) {
-    record("the staged server carries no data directory",
-      !existsSync(path.join(staged, "data")));
-    record("the staged server carries no .env file",
+    record("no .env file is ever copied into the standalone server",
       !existsSync(path.join(staged, ".env")) && !existsSync(path.join(staged, ".env.local")));
   } else {
-    console.log("  (nothing staged — run `npm run desktop:stage` to check the staged tree)");
+    console.log("  (nothing built — run `npm run build` to check the standalone tree)");
   }
 } finally {
   for (const c of children) stop(c);

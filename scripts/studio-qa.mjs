@@ -45,6 +45,11 @@ const BASE = process.argv[2] ?? "http://localhost:3100";
 const PRESET = "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
 const EXEC = process.env.PW_CHROME ?? (existsSync(PRESET) ? PRESET : undefined);
 
+/** A solid-colour PNG, for upload tests that need a real image file. */
+async function makePng(width, height, rgb) {
+  return sharp({ create: { width, height, channels: 3, background: rgb } }).png().toBuffer();
+}
+
 const results = [];
 let failures = 0;
 function record(name, ok, detail = "") {
@@ -692,10 +697,10 @@ await page.waitForURL(`${BASE}/`, { timeout: 15000 });
 
 await page.goto(`${BASE}/projects/new`, { waitUntil: "networkidle" });
 await page.getByLabel("Business name").fill("Tzanos Autoelectric");
-await page.getByLabel("What kind of business is it?").fill("Car electrics workshop");
 await page.getByLabel("Describe the business").fill("Auto electrical repairs, diagnostics and battery replacement since 1994.");
-await page.getByRole("button", { name: "Continue" }).click();
+await page.locator("[data-wizard-secondary]").click();
 await page.getByLabel("Town or city").fill("Larissa");
+await page.getByLabel("What kind of business is it?").fill("Car electrics workshop");
 await page.getByLabel("Phone").fill("+30 2410 000000");
 await page.getByRole("button", { name: "Continue" }).click();
 await page.getByRole("radio", { name: /Full business website/ }).click();
@@ -984,6 +989,161 @@ console.log("\n=== The search listing is editable ===\n");
     html.includes("<title>Tzanos Autoelectric — Car electrics in Larissa</title>"));
   record("the social preview follows it",
     /property="og:title" content="Tzanos Autoelectric/.test(html));
+}
+
+/* ======================================================================
+   Sections can be added and removed without regenerating
+   ====================================================================== */
+
+console.log("\n=== Sections can be added and removed ===\n");
+
+{
+  await page.goto(`${projectUrl}/edit`, { waitUntil: "networkidle" });
+  const before = (await api(`/api/projects/${projectId}/site`)).json.site;
+  const beforeCount = before.sections.length;
+  const themeBefore = JSON.stringify(before.theme);
+
+  // networkidle is not hydration: the handler must exist before the click,
+  // or the test measures React's startup rather than the feature.
+  await page.locator("[data-section-add]").waitFor({ timeout: 15000 });
+  await page.waitForTimeout(1200);
+  await page.locator("[data-section-add]").click();
+  const addType = page.locator('[data-section-add-type="gallery"]');
+  await addType.waitFor({ timeout: 10000 });
+  await addType.click();
+  await page.waitForTimeout(1800);
+
+  const added = (await api(`/api/projects/${projectId}/site`)).json.site;
+  record("a section can be added from the editor",
+    added.sections.length === beforeCount + 1, `${beforeCount} → ${added.sections.length}`);
+  const newSection = added.sections.find((x) => !before.sections.some((y) => y.id === x.id));
+  record("...of the type that was chosen", newSection?.type === "gallery", newSection?.type);
+  record("...structurally complete, so the site still renders",
+    Array.isArray(newSection?.imageIds) &&
+      (await api(`/api/projects/${projectId}/render`)).status === 200);
+  record("...above the footer, never after it",
+    added.sections.at(-1).type === "footer");
+  record("adding a section does not touch the design system",
+    JSON.stringify(added.theme) === themeBefore);
+
+  // Remove it again.
+  // Target the section that was just added, by its own id: a generated site
+  // may already have a gallery, and removing the wrong one would make this
+  // test pass for the wrong reason.
+  await page.reload({ waitUntil: "networkidle" });
+  await page.locator("[data-section-row]").first().waitFor({ timeout: 15000 });
+  await page.waitForTimeout(1200);
+  const index = added.sections.findIndex((x) => x.id === newSection.id);
+  await page.locator("[data-section-row]").nth(index).locator("[data-section-remove]").click();
+  const confirm = page.locator("[data-section-remove-confirm]");
+  await confirm.waitFor({ timeout: 10000 });
+  await confirm.click();
+  await page.waitForTimeout(1800);
+
+  const removed = (await api(`/api/projects/${projectId}/site`)).json.site;
+  record("a section can be removed again",
+    removed.sections.length === beforeCount, `${removed.sections.length}`);
+  record("...and its strings go with it, leaving nothing unreachable",
+    !Object.keys(removed.i18n[removed.meta.defaultLocale].strings)
+      .some((k) => k.startsWith(`${newSection.id}.`)));
+  record("...the page still renders",
+    (await api(`/api/projects/${projectId}/render`)).status === 200);
+  record("...and the design system is still untouched",
+    JSON.stringify(removed.theme) === themeBefore);
+}
+
+/* ======================================================================
+   The logo can be replaced after generation
+   ====================================================================== */
+
+console.log("\n=== The logo can be replaced after generation ===\n");
+
+{
+  await page.goto(`${projectUrl}/media`, { waitUntil: "networkidle" });
+  await page.locator("[data-logo-card]").waitFor({ timeout: 15000 });
+  record("the logo has its own control on the images screen",
+    await page.locator("[data-logo-card]").isVisible());
+
+  const png = await makePng(300, 120, { r: 0x0b, g: 0x3d, b: 0x91 });
+  await page.locator("[data-logo-input]").setInputFiles({
+    name: "new-logo.png", mimeType: "image/png", buffer: png,
+  });
+  await page.waitForTimeout(2500);
+
+  const site = (await api(`/api/projects/${projectId}/site`)).json.site;
+  record("the replacement reaches the site document, not just the project row",
+    Boolean(site.meta.logo?.assetId), JSON.stringify(site.meta.logo ?? null));
+  const html = (await api(`/api/projects/${projectId}/render`)).text ?? "";
+  record("...and the rendered page uses it",
+    html.includes(`/api/assets/${site.meta.logo.assetId}`));
+  record("its height comes from the design system, and the width follows",
+    site.meta.logo.height > 0 && !("width" in site.meta.logo));
+}
+
+/* ======================================================================
+   Safe fixes are offered, applied, and reversible
+   ====================================================================== */
+
+console.log("\n=== Safe fixes ===\n");
+
+{
+  const before = (await api(`/api/projects/${projectId}/site`)).json.site;
+  const stringsBefore = JSON.stringify(before.i18n[before.meta.defaultLocale].strings);
+  const versionsBefore = (await api(`/api/projects/${projectId}/versions`)).json?.versions?.length ?? 0;
+
+  const fixed = await api(`/api/projects/${projectId}/fix`, { method: "POST" });
+  record("the fix endpoint answers rather than failing", fixed.status === 200, `status ${fixed.status}`);
+  record("...and reports exactly what it did",
+    Array.isArray(fixed.json?.applied) &&
+      fixed.json.applied.every((c) => typeof c.what === "string" && c.what.length > 4),
+    JSON.stringify(fixed.json?.applied ?? []));
+
+  const after = (await api(`/api/projects/${projectId}/site`)).json.site;
+  record("the creator's own words are never rewritten by it",
+    JSON.stringify(after.i18n[after.meta.defaultLocale].strings) === stringsBefore);
+  record("the document is still valid afterwards",
+    (await api(`/api/projects/${projectId}/render`)).status === 200);
+
+  if ((fixed.json?.applied ?? []).length) {
+    const versionsAfter = (await api(`/api/projects/${projectId}/versions`)).json?.versions?.length ?? 0;
+    record("...and the previous version is kept, so it can be undone",
+      versionsAfter > versionsBefore, `${versionsBefore} → ${versionsAfter}`);
+  } else {
+    record("a page with nothing to fix is left completely alone",
+      JSON.stringify(after) === JSON.stringify(before));
+  }
+}
+
+/* ======================================================================
+   Editing updates the live preview without regenerating
+   ====================================================================== */
+
+console.log("\n=== Edit, save, preview ===\n");
+
+{
+  await page.goto(`${projectUrl}/edit`, { waitUntil: "networkidle" });
+  await page.locator("iframe[data-preview-frame]").waitFor({ timeout: 30000 });
+
+  const jobsBefore = (await api(`/api/projects/${projectId}/status`)).json;
+
+  // Change a heading through the editor and watch the frame follow.
+  await page.locator("[data-section-row]").first().getByRole("button").nth(1).click();
+  const field = page.locator("textarea, input[type='text']").first();
+  await field.waitFor({ timeout: 10000 });
+  const edited = `Auto electrics, done properly ${Date.now() % 1000}`;
+  await field.fill(edited);
+  const save = page.getByRole("button", { name: /^Save/ }).first();
+  if (await save.isVisible()) await save.click();
+  await page.waitForTimeout(2500);
+
+  const html = (await api(`/api/projects/${projectId}/render`)).text ?? "";
+  record("an edit reaches the rendered page without regenerating",
+    html.includes(edited), edited);
+  const status = (await api(`/api/projects/${projectId}/status`)).json;
+  record("...and no generation job was started",
+    status?.status === jobsBefore?.status, `${jobsBefore?.status} → ${status?.status}`);
+  record("the preview frame is still there, not a full page reload",
+    await page.locator("iframe[data-preview-frame]").isVisible());
 }
 
 await browser.close();

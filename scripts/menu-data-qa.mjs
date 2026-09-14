@@ -211,6 +211,38 @@ try {
   record("the Google account is connected", state.json?.google?.connected === true,
     state.json?.google?.email ?? "");
 
+  /* ---------------------------------------- the central Google connection */
+  // The settings screen and the menu screen read the same status endpoint,
+  // so what it reports is what both of them show.
+  let status = await api("/api/google/status");
+  record("the connection status endpoint reports a live connection",
+    status.status === 200 && status.json?.google?.connected === true);
+  record("...and which capabilities it actually has",
+    status.json?.google?.sheets === true && status.json?.google?.drive === true,
+    JSON.stringify(status.json?.google ?? {}));
+  record("...with nothing missing", status.json?.google?.missingPermissions === false);
+  record("the status endpoint never carries a token",
+    !/access_token|refresh_token|ya29\.|client_secret/i.test(status.text), status.text.slice(0, 80));
+
+  record("connecting again while already connected is allowed",
+    [302, 303, 307, 308].includes(
+      (await api(`/api/google/connect?returnTo=${encodeURIComponent("/account/google")}`)).status,
+    ));
+
+  // A consent the person declined must read as declined, not as a failure.
+  const denied = await api("/api/google/callback?error=access_denied&state=x");
+  record("a declined consent is reported as declined, not as a crash",
+    [302, 303, 307, 308].includes(denied.status) &&
+      (denied.location ?? "").includes("google=denied"),
+    `status ${denied.status}`);
+
+  // A forged callback must not attach an account.
+  const forged = await api("/api/google/callback?code=whatever&state=not-the-one-issued");
+  record("a callback with the wrong state is refused",
+    (forged.location ?? "").includes("google=state"), forged.location ?? `status ${forged.status}`);
+  record("...and the real connection is untouched",
+    (await api("/api/google/status")).json?.google?.connected === true);
+
   // Tokens must never leave the server.
   record("no tokens are exposed by the API",
     !JSON.stringify(state.json).match(/mock-access|mock-refresh|access_token|refresh_token/));
@@ -427,6 +459,31 @@ try {
   record("the last good menu is still served after a failed sync",
     stillThere.text.includes("Greek Salad"));
   record("no invented menu data replaces it", !stillThere.text.includes("Lorem"));
+
+  /* -------------------------------------------------------- disconnecting */
+  // Last, because everything above needs the connection. Disconnecting is the
+  // one Google action with a consequence a person might regret, so what it
+  // does and does not touch is worth pinning down.
+  const gone = await api("/api/google/disconnect", { method: "POST" });
+  record("disconnecting succeeds", gone.status === 200);
+
+  const afterDisconnect = await api("/api/google/status");
+  record("...and the connection is reported as gone",
+    afterDisconnect.json?.google?.connected === false &&
+      afterDisconnect.json?.google?.email === "");
+  record("...while Google itself is still configured on this server",
+    afterDisconnect.json?.google?.configured === true);
+  record("...and no capability is claimed any more",
+    afterDisconnect.json?.google?.sheets === false &&
+      afterDisconnect.json?.google?.drive === false);
+
+  const orphaned = await api("/api/google/spreadsheets");
+  record("a Google call after disconnecting fails cleanly rather than hanging",
+    orphaned.status >= 400 && Boolean(orphaned.json?.error), `status ${orphaned.status}`);
+
+  const survives = await api(`/api/projects/${projectId}/render`);
+  record("the generated website is completely unaffected by disconnecting",
+    survives.status === 200 && survives.text.includes("Greek Salad"));
 } finally {
   for (const c of children) stop(c);
   rmSync(dataDir, { recursive: true, force: true });

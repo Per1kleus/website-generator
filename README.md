@@ -153,6 +153,25 @@ The generator picks one from the *business*, not from a dropdown: identity
 analysis reads materials, light and atmosphere first, then chooses an
 architecture and a palette that follow from them.
 
+### Google, in one place
+
+`/account/google` is the only screen that connects Google, and
+`components/GoogleConnection.tsx` is the only component that does it — the
+Digital Menu builder embeds the same one rather than keeping a second copy.
+Underneath is the existing implementation throughout: one consent start, one
+callback, one encrypted token store, two read-only scopes.
+
+Availability is read from the scopes Google actually granted rather than the
+ones that were requested, because consent is per permission. Someone can
+approve Sheets, decline Drive, and the flow still succeeds — the failure would
+otherwise surface days later as a menu image that will not load.
+`/api/google/status` returns that and nothing else; it selects the email and
+the granted scopes, so there is no path from it to a token.
+
+Failures are translated once, in `lib/google-errors.ts`, into a sentence and a
+next step. The raw reason goes to the server log, where a failure is actually
+diagnosed.
+
 ### Research, and never inventing anything
 
 `server/research.ts` researches the business with Gemini, grounded in Google
@@ -537,7 +556,7 @@ the backend address once, or the build bakes it in.
 npm run build:windows                        # → WebsiteGenerator-Setup.exe
 npm run build:windows:cross                  # the same, built from Linux/macOS
 WG_REMOTE_URL=https://example.com npm run build:android     # → APK
-npm run test:desktop                                        # 52 packaging checks
+npm run test:desktop                                        # 55 packaging checks
 npm run test:setup                                          # 40 first-launch checks
 ```
 

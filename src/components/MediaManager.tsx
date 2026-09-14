@@ -148,7 +148,8 @@ export function MediaManager({
           its own upload rules, and it is the thing people most often want to
           change after seeing the finished site. */}
       <input
-        ref={logoRef} type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml,.svg"
+        ref={logoRef} type="file" data-logo-input
+        accept="image/png,image/jpeg,image/webp,image/svg+xml,.svg"
         className="hidden" onChange={(e) => { void replaceLogo(e.target.files); e.target.value = ""; }}
       />
       <section className="my-4" data-logo-card data-logo-id={logoId}>

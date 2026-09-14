@@ -324,14 +324,36 @@ export function validateSiteDoc(candidate: Site, previous: Site): Site {
   const locales = previous.meta.locales;
   const defaultLocale = previous.meta.defaultLocale;
 
+  /**
+   * Keys belonging to a section this save removed.
+   *
+   * The catalog is merged onto the previous one, which is what stops a model
+   * returning half a document from wiping every translation. The cost is that
+   * a deletion could never take effect: remove a section and its strings came
+   * straight back on the next save, so the document grew forever with keys
+   * nothing could ever reach again.
+   *
+   * Every string key is prefixed with the id of the section it belongs to, so
+   * an id that was in the previous document and is not in this one identifies
+   * exactly the orphans — and nothing else. Keys for surviving sections still
+   * fall back to the previous catalog, untouched.
+   */
+  const survivingIds = new Set(clean.map((s) => s.id));
+  const removedIds = previous.sections
+    .map((s) => s.id)
+    .filter((id) => !survivingIds.has(id));
+  const isOrphan = (k: string) => removedIds.some((id) => k.startsWith(`${id}.`));
+
   const i18n: Site["i18n"] = {};
   for (const l of locales) {
     const incoming = candidate.i18n?.[l];
     const prior = previous.i18n[l] ?? emptyCatalog();
-    const strings: Record<string, string> = { ...prior.strings };
+    const strings: Record<string, string> = Object.fromEntries(
+      Object.entries(prior.strings).filter(([k]) => !isOrphan(k)),
+    );
     if (incoming?.strings && typeof incoming.strings === "object") {
       for (const [k, v] of Object.entries(incoming.strings)) {
-        if (typeof v === "string") strings[k] = v;
+        if (typeof v === "string" && !isOrphan(k)) strings[k] = v;
       }
     }
     const seoIn = incoming?.seo;
