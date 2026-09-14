@@ -126,6 +126,58 @@ export function connectionInfo(userId: string): { connected: boolean; email: str
   return { connected: Boolean(row), email: row?.email ?? "" };
 }
 
+/**
+ * What the creator's Google connection can currently do.
+ *
+ * Derived from the scopes Google actually granted rather than from the scopes
+ * that were asked for: a person can approve one permission and decline
+ * another on the consent screen, and a UI that claims Sheets works because it
+ * was requested would be lying about the thing most likely to have gone wrong.
+ *
+ * Tokens never appear here. This is the shape the client is allowed to see.
+ */
+export type GoogleStatus = {
+  /** Whether this deployment has Google credentials at all. */
+  configured: boolean;
+  connected: boolean;
+  email: string;
+  /** Per-capability, from the granted scopes. */
+  sheets: boolean;
+  drive: boolean;
+  /** True when connected but something the app needs was not approved. */
+  missingPermissions: boolean;
+};
+
+export function connectionStatus(userId: string): GoogleStatus {
+  const row = db
+    .prepare("SELECT email, scope FROM google_accounts WHERE user_id = ?")
+    .get(userId) as { email: string; scope: string } | undefined;
+
+  const configured = googleConfigured();
+  if (!row) {
+    return { configured, connected: false, email: "", sheets: false, drive: false,
+      missingPermissions: false };
+  }
+
+  const granted = (row.scope ?? "").split(/\s+/).filter(Boolean);
+  const has = (scope: string) => granted.includes(scope);
+  // An older row may predate scope being stored. Absent is not "denied": the
+  // connection was made with exactly these scopes, so treat it as granted
+  // rather than telling the creator to reconnect for no reason.
+  const unknown = granted.length === 0;
+  const sheets = unknown || has(SCOPES[0]);
+  const drive = unknown || has(SCOPES[1]);
+
+  return {
+    configured,
+    connected: true,
+    email: row.email ?? "",
+    sheets,
+    drive,
+    missingPermissions: !sheets || !drive,
+  };
+}
+
 export function disconnect(userId: string): void {
   db.prepare("DELETE FROM google_accounts WHERE user_id = ?").run(userId);
 }

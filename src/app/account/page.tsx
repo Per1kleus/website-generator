@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
+import Link from "next/link";
 import { getCurrentUser } from "@/server/auth";
+import { connectionStatus } from "@/server/google/oauth";
 import { isDesktop } from "@/server/runtime";
 import { listProjects } from "@/server/projects";
 import { AppShell } from "@/components/AppShell";
@@ -17,6 +19,7 @@ export default async function AccountPage() {
 
   const projects = listProjects(user.id);
   const live = projects.filter((p) => p.status === "ready").length;
+  const google = connectionStatus(user.id);
 
   return (
     <AppShell>
@@ -47,6 +50,29 @@ export default async function AccountPage() {
           <p className="text-xs text-muted">Websites ready</p>
         </Card>
       </div>
+
+      {/* Google lives on its own screen; this is the signpost to it, showing
+          the one fact worth knowing from here. */}
+      <Link
+        href="/account/google"
+        className="mt-4 flex min-h-[var(--spacing-touch-lg)] items-center gap-3 rounded-card border border-line bg-surface p-4 hover:bg-elevated active:bg-elevated"
+        data-google-link
+      >
+        <span aria-hidden="true" className="text-xl">🔗</span>
+        <span className="min-w-0 flex-1">
+          <span className="block font-semibold">Google connections</span>
+          <span className="block text-sm text-muted" data-google-summary>
+            {!google.configured
+              ? "Not configured on this computer"
+              : google.connected
+                ? google.missingPermissions
+                  ? "Connected, but some permissions are missing"
+                  : `Connected${google.email ? ` · ${google.email}` : ""}`
+                : "Not connected"}
+          </span>
+        </span>
+        <span aria-hidden="true" className="text-muted">›</span>
+      </Link>
 
       <DesignEngineCard />
 

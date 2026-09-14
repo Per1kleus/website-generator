@@ -81,6 +81,18 @@ function reportStage(jobId: string, stageKey: string, message: string) {
     writeJob(jobId, { message });
     return;
   }
+
+  // Progress only ever moves forward. The pipeline legitimately reports an
+  // earlier stage again — the design critic runs after the photographs are
+  // placed, and has something to say about the design — and a bar that slid
+  // backwards would read as the work being redone. The message still updates,
+  // because that part is true and worth showing.
+  const current = job.steps.findIndex((s) => s.status === "active");
+  if (current >= 0 && index < current) {
+    writeJob(jobId, { message });
+    return;
+  }
+
   const steps = job.steps.map((s, i) => ({
     ...s,
     status: i < index ? ("done" as const) : i === index ? ("active" as const) : s.status,

@@ -244,8 +244,13 @@ export async function runGeneration(
      reserves for it. All measurement, no model — and no photographs means no
      photograph-shaped sections rather than a grey box where one should be. */
   let insights: ImageInsight[] = [];
+  report(
+    "images",
+    assets.length
+      ? `Measuring ${assets.length} photograph${assets.length === 1 ? "" : "s"}`
+      : "No photographs to place",
+  );
   if (assets.length) {
-    report("design", `Placing ${assets.length} photograph${assets.length === 1 ? "" : "s"}`);
     try {
       insights = await inspectAssets(assets);
     } catch (err) {
@@ -264,7 +269,7 @@ export async function runGeneration(
   if (placements.length) {
     const hero = placements.find((p) => p.role === "hero");
     report(
-      "design",
+      "images",
       hero
         ? `The strongest photograph leads the page, cropped to its focal point`
         : `Photographs placed in the gallery; the hero is typographic`,

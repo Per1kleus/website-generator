@@ -6,7 +6,7 @@ import { AppShell } from "./AppShell";
 import { AppBar, Banner, BottomSheet, Button, Card, TextInput, useToast } from "./ui";
 import { IconCheck, IconAlert, IconExternal, IconSettings } from "./icons";
 import type { MenuSource } from "@/server/menu/source";
-import { isPackaged, openExternal } from "@/lib/shell";
+import { GoogleConnection } from "./GoogleConnection";
 
 /**
  * 🍽️ Digital Menu Data — the builder-side configuration screen.
@@ -56,7 +56,6 @@ export function MenuDataManager({
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState("");
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [awaitingConsent, setAwaitingConsent] = useState(false);
   const [sheets, setSheets] = useState<Sheet[]>([]);
   const [search, setSearch] = useState("");
   const [chosen, setChosen] = useState<Sheet | null>(null);
@@ -89,23 +88,6 @@ export function MenuDataManager({
     if (params.get("google")) void reload();
   }, [params, reload]);
 
-  // Consent happens in a separate browser window, so nothing navigates this
-  // one when it completes. Poll while waiting, and stop as soon as it lands
-  // or the user gives up — no permanent background polling.
-  useEffect(() => {
-    if (!awaitingConsent) return;
-    const started = Date.now();
-    const timer = setInterval(async () => {
-      await reload();
-      if (Date.now() - started > 5 * 60_000) setAwaitingConsent(false);
-    }, 2000);
-    return () => clearInterval(timer);
-  }, [awaitingConsent, reload]);
-
-  useEffect(() => {
-    if (google.connected) setAwaitingConsent(false);
-  }, [google.connected]);
-
   async function post(body: Record<string, unknown>, label: string) {
     setBusy(label);
     setError("");
@@ -126,41 +108,6 @@ export function MenuDataManager({
     } catch {
       setError("Could not reach the server. Check your connection and try again.");
       return null;
-    } finally {
-      setBusy("");
-    }
-  }
-
-  /**
-   * Starts the Google sign-in.
-   *
-   * In a browser this is an ordinary redirect. In a packaged app the consent
-   * screen must open in the user's own browser — Google refuses OAuth inside
-   * an embedded webview — so the app asks the server for the URL, opens it
-   * externally, and then watches for the connection to appear.
-   */
-  async function connectGoogle() {
-    const returnTo = `/projects/${projectId}/menu-data`;
-    const href = `/api/google/connect?returnTo=${encodeURIComponent(returnTo)}`;
-
-    if (!isPackaged()) {
-      window.location.href = href;
-      return;
-    }
-
-    setBusy("connect");
-    setError("");
-    try {
-      const res = await fetch(`${href}&mode=url`);
-      const data = await res.json();
-      if (!res.ok || !data.url) {
-        setError(data.error ?? "Could not start Google sign-in.");
-        return;
-      }
-      await openExternal(data.url as string);
-      setAwaitingConsent(true);
-    } catch {
-      setError("Could not start Google sign-in.");
     } finally {
       setBusy("");
     }
@@ -257,33 +204,20 @@ export function MenuDataManager({
           <span aria-hidden="true">🍽️</span> Menu data source
         </h2>
 
-        {!google.configured ? (
-          <p className="mt-2 text-sm text-muted">
-            Google is not configured on this server. Whoever runs the app needs
-            to set <code>GOOGLE_CLIENT_ID</code> and <code>GOOGLE_CLIENT_SECRET</code>.
-          </p>
-        ) : !google.connected ? (
-          <>
-            <p className="mt-2 text-sm text-muted">
-              Connect the Google account that owns your menu spreadsheet. The
-              app only ever reads — it never edits your Sheets or Drive.
-            </p>
-            <Button
-              size="lg"
-              block
-              className="mt-3"
-              loading={busy === "connect"}
-              onClick={connectGoogle}
-            >
-              Connect Google Sheets
-            </Button>
-            {awaitingConsent && (
-              <p className="mt-2 text-xs text-muted">
-                Finish signing in with Google in your browser, then come back —
-                this will pick it up automatically.
-              </p>
-            )}
-          </>
+        {!google.connected ? (
+          // One connection flow, owned by GoogleConnection. This screen used
+          // to carry a second copy of it; now it embeds the same component the
+          // Google settings screen uses, so there is one implementation to fix.
+          <GoogleConnection
+            returnTo={`/projects/${projectId}/menu-data`}
+            onChange={(status) =>
+              setGoogle({
+                connected: status.connected,
+                email: status.email,
+                configured: status.configured,
+              })
+            }
+          />
         ) : (
           <>
             <p className="mt-2 flex items-center gap-2 text-sm">

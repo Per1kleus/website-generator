@@ -194,7 +194,6 @@ async function main() {
   await checkTargets(page, "wizard step 1", POINTER_TARGET);
 
   await page.getByLabel("Business name").fill("Caffè Verde");
-  await page.getByLabel("What kind of business is it?").fill("Coffee shop");
   await page
     .getByLabel("Describe the business")
     .fill("Small independent coffee shop near the station. We roast our own beans and bake everything in-house.");
@@ -208,36 +207,50 @@ async function main() {
   await page.getByRole("button", { name: "Remove logo" }).waitFor({ timeout: 20000 });
   record("logo uploads and previews in the wizard", true);
 
-  await page.screenshot({ path: `${SHOTS}/03-wizard-business.png` });
-  await page.getByRole("button", { name: "Continue" }).click();
+  // Everything a website genuinely needs is on this one screen, with the
+  // Generate button already under the thumb. Everything else is behind
+  // "More options" and has a working default.
+  record("the first screen carries every essential field",
+    (await page.getByLabel("Business name").isVisible()) &&
+      (await page.getByLabel("Google Maps link").isVisible()) &&
+      (await page.getByLabel("Existing website").isVisible()) &&
+      (await page.getByLabel("Describe the business").isVisible()) &&
+      (await page.locator("[data-wizard-generate]").isVisible()));
+  record("the technical choices are not on it",
+    !(await page.getByRole("radio", { name: /Digital menu/ }).isVisible()));
 
-  // Step 2: paste a Google Maps link, exactly as from the mobile share sheet.
+  // Paste a Google Maps link, exactly as from the mobile share sheet.
   await page.getByLabel("Google Maps link").fill(
     "https://www.google.com/maps/place/Caffe+Verde/@40.6401,22.9444,17z",
   );
-  await page.getByLabel("Town or city").fill("Thessaloniki");
-  await page.getByLabel("Phone").fill("+30 2310 000000");
   const recognised = await page.getByText(/Recognised: Caffe Verde/i).isVisible();
   record("Google Maps link is parsed and confirmed inline", recognised);
 
   // The existing website is optional, and a broken one has to be recoverable
   // in place: the creator must be able to fix it or clear it and carry on.
   const website = page.getByLabel("Existing website");
-  record("the existing-website field is offered on the location step",
-    await website.isVisible());
   await website.fill("http://localhost:3000");
-  await page.getByRole("button", { name: "Continue" }).click();
+  await page.locator("[data-wizard-secondary]").click();
   const refused = await page.getByText(/points at this computer|private network/i).isVisible();
   record("a broken website address stops the step and explains itself", refused);
-  record("...and the step is still the location step, not a lost page",
+  record("...and the creator is still on the first screen, not a lost page",
     await page.getByLabel("Google Maps link").isVisible());
   await website.fill("");
+  await page.screenshot({ path: `${SHOTS}/03-wizard-business.png` });
+
+  // Into the optional steps, which is where the rest of this run needs to go:
+  // it builds a Greek-language digital menu.
+  await page.locator("[data-wizard-secondary]").click();
+  record("clearing the optional website lets the wizard continue",
+    await page.getByLabel("Town or city").isVisible());
+
+  await page.getByLabel("Town or city").fill("Thessaloniki");
+  await page.getByLabel("What kind of business is it?").fill("Coffee shop");
+  await page.getByLabel("Phone").fill("+30 2310 000000");
   await page.screenshot({ path: `${SHOTS}/04-wizard-maps.png` });
   await page.getByRole("button", { name: "Continue" }).click();
-  record("clearing the optional website lets the wizard continue",
-    await page.getByRole("radio", { name: /Digital menu/ }).isVisible());
 
-  // Step 3: website type
+  // Optional step 2: website type
   await checkTargets(page, "wizard step 3", POINTER_TARGET);
   await page.getByRole("radio", { name: /Digital menu/ }).click();
   await page.screenshot({ path: `${SHOTS}/05-wizard-type.png` });
@@ -605,10 +618,10 @@ async function main() {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(`${BASE}/projects/new`, { waitUntil: "networkidle" });
   await page.getByLabel("Business name").fill("Atelier Nord");
-  await page.getByLabel("What kind of business is it?").fill("Architecture studio");
   await page.getByLabel("Describe the business").fill("A small architecture studio working on stone and concrete houses.");
-  await page.getByRole("button", { name: "Continue" }).click();
+  await page.locator("[data-wizard-secondary]").click();
   await page.getByLabel("Town or city").fill("Oslo");
+  await page.getByLabel("What kind of business is it?").fill("Architecture studio");
   await page.getByRole("button", { name: "Continue" }).click();
   await page.getByRole("radio", { name: /Full business website/ }).click();
   await page.getByRole("button", { name: "Continue" }).click();

@@ -514,15 +514,29 @@ export function siteDir(site: Site, locale: Locale): "ltr" | "rtl" {
   return localeDir(locale);
 }
 
+/**
+ * The stages a creator sees while a website is generated.
+ *
+ * The order is the order the pipeline actually reports them in, which matters
+ * more than it looks: progress is derived from a stage's position in this
+ * list, so a list that disagrees with the pipeline makes the bar jump
+ * backwards. Photographs have a stage of their own because placing them is
+ * visibly separate work, and a creator who uploaded twelve pictures should be
+ * able to see that they are being dealt with.
+ *
+ * Labels are what is happening, not implementation detail. Nobody needs to
+ * read "token engine" or "critic pass" to trust that their site is being made.
+ */
 export const GENERATION_STEPS: { key: string; label: string }[] = [
-  { key: "research", label: "Business researched" },
-  { key: "analysis", label: "Identity analysed" },
-  { key: "architecture", label: "Design architecture chosen" },
-  { key: "content", label: "Content written" },
-  { key: "design", label: "Layout and design system composed" },
-  { key: "localize", label: "Languages prepared" },
-  { key: "build", label: "Website built" },
-  { key: "seo", label: "SEO generated" },
-  { key: "qa", label: "Checked on four screen sizes" },
-  { key: "validate", label: "Validation passed" },
+  { key: "research", label: "Researching the business" },
+  { key: "analysis", label: "Analysing the identity" },
+  { key: "architecture", label: "Choosing the design direction" },
+  { key: "content", label: "Writing the content" },
+  { key: "design", label: "Building the layout" },
+  { key: "images", label: "Optimising the photographs" },
+  { key: "localize", label: "Preparing the languages" },
+  { key: "seo", label: "Creating the SEO" },
+  { key: "qa", label: "Checking every screen size" },
+  { key: "build", label: "Building the website" },
+  { key: "validate", label: "Running the quality checks" },
 ];

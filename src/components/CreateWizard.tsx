@@ -12,15 +12,29 @@ import { isProbablyMapsUrl, parseMapsUrl } from "@/lib/maps";
 import { checkWebsiteUrl } from "@/lib/website-url";
 
 /**
- * Project creation as a stepped flow (requirement 4).
+ * Project creation.
  *
- * One question per screen: a phone keyboard covers half the viewport, so a
- * single long form means the creator never sees where they are. Each step
- * validates on its own and every error is recoverable in place.
+ * The first screen is the whole job. Everything a website genuinely needs —
+ * the name, where the business is, what it already has online, what it does,
+ * its logo — is on one screen with a Generate button underneath, because that
+ * is the shape of the task a creator actually has.
+ *
+ * The rest is not removed, it is demoted. Contact details, site type, extra
+ * languages and a starting style all still exist behind "More options", and
+ * all have defaults that the generation pipeline improves on by itself: the
+ * research step finds the phone number, the design catalogue picks the style,
+ * the layout engine composes the page. Asking a person to choose a "starting
+ * look" that the identity analysis is about to override is asking them to do
+ * work that will be thrown away.
+ *
+ * Beyond the first screen it stays one question per screen: a phone keyboard
+ * covers half the viewport, so a long form means the creator never sees where
+ * they are. Each step validates on its own and every error is recoverable in
+ * place.
  */
 
 type Step = 0 | 1 | 2 | 3 | 4;
-const STEP_TITLES = ["Your business", "Location", "What to build", "Languages", "Style"];
+const STEP_TITLES = ["Create new website", "Contact details", "What to build", "Languages", "Style"];
 
 type Form = {
   businessName: string;
@@ -72,25 +86,29 @@ export function CreateWizard() {
 
   function validateStep(s: Step): boolean {
     const next: Record<string, string> = {};
-    if (s === 0 && form.businessName.trim().length < 2) {
-      next.businessName = "Enter the name of the business.";
-    }
-    if (s === 1) {
+
+    if (s === 0) {
+      if (form.businessName.trim().length < 2) {
+        next.businessName = "Enter the name of the business.";
+      }
       if (form.mapsUrl.trim() && !isProbablyMapsUrl(form.mapsUrl)) {
         next.mapsUrl = "That does not look like a Google Maps link. You can also leave it empty.";
-      }
-      // Requirement 1: a Maps link OR a written description is enough.
-      if (!form.mapsUrl.trim() && !form.location.trim() && !form.description.trim()) {
-        next.location = "Add a Google Maps link, or a town, or describe the business on the previous step.";
-      }
-      if (form.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) {
-        next.email = "Enter a valid email address.";
       }
       // Optional, so an empty field is valid. Only a broken address stops the
       // step, and the message says it can simply be cleared.
       const website = checkWebsiteUrl(form.websiteUrl);
       if (!website.ok) next.websiteUrl = `${website.error} You can also leave it empty.`;
+      // Requirement 1: a Maps link OR a written description is enough. Both
+      // are on this screen, so the rule can be checked where it is broken.
+      if (!form.mapsUrl.trim() && !form.description.trim() && !form.location.trim()) {
+        next.description = "Add a Google Maps link, or describe the business in a sentence.";
+      }
     }
+
+    if (s === 1 && form.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) {
+      next.email = "Enter a valid email address.";
+    }
+
     setErrors(next);
     return Object.keys(next).length === 0;
   }
@@ -144,7 +162,9 @@ export function CreateWizard() {
   }
 
   async function submit() {
-    if (!validateStep(0) || !validateStep(1)) {
+    // Only the first screen can make a project invalid; everything after it
+    // is optional and already has a working default.
+    if (!validateStep(0)) {
       goto(0);
       return;
     }
@@ -173,26 +193,36 @@ export function CreateWizard() {
 
   return (
     <AppShell>
-      <AppBar title={STEP_TITLES[step]} subtitle={`Step ${step + 1} of 5`} back={true} />
+      {/* The first screen is not "step 1 of 5" — it is the whole task. The
+          counter appears only once someone has chosen to go further, where it
+          genuinely tells them where they are. */}
+      <AppBar
+        title={STEP_TITLES[step]}
+        subtitle={step === 0 ? "Everything else is decided for you" : `Optional · step ${step} of 4`}
+        back={true}
+      />
 
-      <div
-        className="mt-2 mb-5 flex gap-1.5"
-        role="progressbar"
-        aria-valuemin={1}
-        aria-valuemax={5}
-        aria-valuenow={step + 1}
-        aria-label={`Step ${step + 1} of 5: ${STEP_TITLES[step]}`}
-      >
-        {[0, 1, 2, 3, 4].map((i) => (
-          <span key={i} className={`h-1.5 flex-1 rounded-full ${i <= step ? "bg-brand" : "bg-elevated"}`} />
-        ))}
-      </div>
+      {step > 0 && (
+        <div
+          className="mt-2 mb-5 flex gap-1.5"
+          role="progressbar"
+          aria-valuemin={1}
+          aria-valuemax={4}
+          aria-valuenow={step}
+          aria-label={`Optional step ${step} of 4: ${STEP_TITLES[step]}`}
+        >
+          {[1, 2, 3, 4].map((i) => (
+            <span key={i} className={`h-1.5 flex-1 rounded-full ${i <= step ? "bg-brand" : "bg-elevated"}`} />
+          ))}
+        </div>
+      )}
+      {step === 0 && <div className="mt-2 mb-1" />}
 
       {formError && <Banner tone="error">{formError}</Banner>}
 
       {step === 0 && (
         <section aria-labelledby="step-0">
-          <h2 id="step-0" className="sr-only">Your business</h2>
+          <h2 id="step-0" className="sr-only">Create new website</h2>
 
           <Field label="Business name" error={errors.businessName}>
             {({ id, describedBy, invalid }) => (
@@ -249,35 +279,9 @@ export function CreateWizard() {
             )}
           </fieldset>
 
-          <Field label="What kind of business is it?" hint="For example: coffee shop, barber, dentist, bakery.">
-            {({ id }) => (
-              <TextInput id={id} value={form.businessType}
-                onChange={(e) => set("businessType", e.target.value)}
-                placeholder="Coffee shop" autoCapitalize="sentences" enterKeyHint="next" />
-            )}
-          </Field>
-
-          <Field
-            label="Describe the business"
-            hint="A sentence or two in your own words. Used alongside research to write the copy."
-          >
-            {({ id }) => (
-              <TextArea id={id} rows={5} value={form.description}
-                onChange={(e) => set("description", e.target.value)}
-                placeholder="Small independent coffee shop near the station. We roast our own beans and bake everything in-house."
-                autoCapitalize="sentences" enterKeyHint="done" />
-            )}
-          </Field>
-        </section>
-      )}
-
-      {step === 1 && (
-        <section aria-labelledby="step-1">
-          <h2 id="step-1" className="sr-only">Location and contact</h2>
-
           <Field
             label="Google Maps link"
-            hint="Open Google Maps, tap Share, then paste the link. We research the business from it."
+            hint="Optional. Open Google Maps, tap Share, then paste the link — the business is researched from it."
             error={errors.mapsUrl}
           >
             {({ id, describedBy, invalid }) => (
@@ -298,7 +302,7 @@ export function CreateWizard() {
 
           <Field
             label="Existing website"
-            hint="Optional. If the business already has a website, we read it as one more source — the new one is still designed from scratch."
+            hint="Optional. If the business already has one, it is read as one more source — the new site is still designed from scratch."
             error={errors.websiteUrl}
           >
             {({ id, describedBy, invalid }) => (
@@ -310,11 +314,48 @@ export function CreateWizard() {
             )}
           </Field>
 
-          <Field label="Town or city" error={errors.location}>
+          <Field
+            label="Describe the business"
+            hint="A sentence or two in your own words. The more real detail, the better the result."
+            error={errors.description}
+          >
             {({ id, describedBy, invalid }) => (
-              <TextInput id={id} aria-describedby={describedBy} invalid={invalid}
+              <TextArea id={id} aria-describedby={describedBy} invalid={invalid}
+                rows={4} value={form.description}
+                onChange={(e) => set("description", e.target.value)}
+                placeholder="Small independent coffee shop near the station. We roast our own beans and bake everything in-house."
+                autoCapitalize="sentences" enterKeyHint="done" />
+            )}
+          </Field>
+
+          <p className="rounded-xl bg-elevated px-3 py-2 text-xs text-muted">
+            That is everything needed. The design, layout, typography, colours,
+            photography and SEO are all chosen for this business automatically.
+          </p>
+        </section>
+      )}
+
+      {step === 1 && (
+        <section aria-labelledby="step-1">
+          <h2 id="step-1" className="sr-only">Contact details</h2>
+          <p className="mb-4 text-sm text-muted">
+            All optional. Research fills in what it can verify, and anything you
+            type here wins over what it finds — you know your own phone number.
+          </p>
+
+          <Field label="Town or city">
+            {({ id }) => (
+              <TextInput id={id}
                 value={form.location} onChange={(e) => set("location", e.target.value)}
                 placeholder="Thessaloniki" autoCapitalize="words" enterKeyHint="next" />
+            )}
+          </Field>
+
+          <Field label="What kind of business is it?" hint="For example: coffee shop, barber, dentist, bakery.">
+            {({ id }) => (
+              <TextInput id={id} value={form.businessType}
+                onChange={(e) => set("businessType", e.target.value)}
+                placeholder="Coffee shop" autoCapitalize="sentences" enterKeyHint="next" />
             )}
           </Field>
 
@@ -490,17 +531,41 @@ export function CreateWizard() {
         className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-canvas/95 px-4 pt-3 backdrop-blur-lg md:pl-60"
       >
         <div className="mx-auto flex max-w-4xl gap-3">
-          <Button variant="secondary" size="lg" onClick={back} className="flex-1">
-            {step === 0 ? "Cancel" : "Back"}
+          {/* On the first screen the secondary action opens the optional
+              steps rather than leaving: generating is the expected thing to
+              do, so it is the one under the thumb from the very start. */}
+          <Button
+            variant="secondary"
+            size="lg"
+            onClick={step === 0 ? () => next() : back}
+            className="flex-1"
+            data-wizard-secondary
+          >
+            {step === 0 ? "More options" : "Back"}
           </Button>
-          {step < 4 ? (
-            <Button size="lg" onClick={next} className="flex-[2]">Continue</Button>
-          ) : (
-            <Button size="lg" onClick={submit} loading={busy} className="flex-[2]">
+          {step === 0 || step === 4 ? (
+            <Button
+              size="lg"
+              onClick={submit}
+              loading={busy}
+              className="flex-[2]"
+              data-wizard-generate
+            >
               Generate website
             </Button>
+          ) : (
+            <Button size="lg" onClick={next} className="flex-[2]">Continue</Button>
           )}
         </div>
+        {step === 0 && (
+          <button
+            type="button"
+            onClick={() => router.push("/")}
+            className="mx-auto mt-1 block py-2 text-center text-sm text-muted underline-offset-2 hover:underline"
+          >
+            Cancel
+          </button>
+        )}
       </div>
       <div aria-hidden="true" className="h-32" />
     </AppShell>

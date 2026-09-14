@@ -1,8 +1,9 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/server/auth";
-import { exchangeCode } from "@/server/google/oauth";
+import { connectionStatus, exchangeCode } from "@/server/google/oauth";
 import { isDesktop, selfOrigin } from "@/server/runtime";
+import { googleFailure } from "@/lib/google-errors";
 
 /** Completes the consent flow and stores the tokens server-side. */
 export async function GET(req: Request) {
@@ -24,16 +25,40 @@ export async function GET(req: Request) {
           new URL(`${returnTo}?google=${encodeURIComponent(reason)}`, url.origin),
         );
 
+  // Whatever Google actually said is kept here, where a failure is diagnosed.
+  // What the creator sees is the translation in lib/google-errors.ts; the two
+  // are deliberately different audiences.
   const error = url.searchParams.get("error");
-  if (error) return fail(error === "access_denied" ? "denied" : "failed");
+  if (error) {
+    console.error("[google] consent failed:", error);
+    return fail(error === "access_denied" ? "denied" : "failed");
+  }
 
   const state = url.searchParams.get("state") ?? "";
   const code = url.searchParams.get("code") ?? "";
-  if (!state || state !== expected) return fail("state");
-  if (!code) return fail("failed");
+  if (!state || state !== expected) {
+    console.error("[google] callback state did not match the one issued");
+    return fail("state");
+  }
+  if (!code) {
+    console.error("[google] callback carried no authorisation code");
+    return fail("failed");
+  }
 
   const result = await exchangeCode(user.id, code, selfOrigin(url.origin), state);
-  if (!result.ok) return fail("failed");
+  if (!result.ok) {
+    console.error("[google] token exchange failed");
+    return fail("failed");
+  }
+
+  // Consent is per permission: someone can approve reading spreadsheets and
+  // decline reading Drive, and the flow still "succeeds". Saying so now is the
+  // difference between a clear message here and a confusing failure later,
+  // when a menu image silently will not load.
+  if (connectionStatus(user.id).missingPermissions) {
+    console.error("[google] connected with an incomplete set of scopes");
+    return fail("partial");
+  }
 
   // On desktop this page is open in the user's own browser, not in the app.
   // Redirecting would leave them staring at the builder in the wrong window,
@@ -52,11 +77,14 @@ export async function GET(req: Request) {
  */
 function closeTab(reason = ""): Response {
   const failed = Boolean(reason);
-  const title = failed ? "Google was not connected" : "Google connected";
-  const body = failed
-    ? reason === "denied"
-      ? "You declined the permission request. Nothing was changed."
-      : "Something went wrong. Go back to Website Generator and try again."
+  const problem = failed ? googleFailure(reason) : null;
+  const title = failed
+    ? reason === "partial"
+      ? "Some permissions were not approved"
+      : "Google was not connected"
+    : "Google connected";
+  const body = problem
+    ? `${problem.message} ${problem.advice}`
     : "You can close this tab and return to Website Generator.";
 
   return new Response(
