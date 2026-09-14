@@ -1,6 +1,6 @@
 import "server-only";
-import { randomUUID } from "node:crypto";
-import { copyFile, mkdir, rm, writeFile } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { copyFile, mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { db } from "./db";
@@ -31,13 +31,32 @@ export type Deployment = {
   project_id: string;
   platform: DeployPlatform;
   slug: string;
-  status: "queued" | "preparing" | "building" | "deploying" | "live" | "failed";
+  status: "queued" | "preparing" | "building" | "deploying" | "live" | "failed" | "unpublished";
   url: string;
   log: string[];
   error: string | null;
   created_at: number;
   updated_at: number;
+  /** When it actually went live. 0 while it never did. */
+  published_at: number;
+  /** Fingerprint of the document that went live, for "changes since". */
+  site_hash: string;
+  /** When the creator took it down. 0 while it is up. */
+  unpublished_at: number;
 };
+
+/**
+ * A fingerprint of exactly what was published.
+ *
+ * "Has this changed since it went live?" is answered by comparing documents,
+ * not timestamps: `updated_at` moves when a project is renamed, when a version
+ * is recorded, when anything at all is touched, and telling a creator their
+ * live site is stale because they opened the editor would train them to
+ * ignore the notice.
+ */
+export function siteFingerprint(site: Site): string {
+  return createHash("sha256").update(JSON.stringify(site)).digest("hex").slice(0, 32);
+}
 
 type DeploymentRow = Omit<Deployment, "log"> & { log: string };
 
@@ -97,8 +116,15 @@ function update(id: string, patch: Partial<Deployment>) {
   if (!current) return;
   const merged = { ...current, ...patch };
   db.prepare(
-    `UPDATE deployments SET status = ?, url = ?, log = ?, error = ?, updated_at = ? WHERE id = ?`,
-  ).run(merged.status, merged.url, JSON.stringify(merged.log), merged.error, Date.now(), id);
+    `UPDATE deployments
+        SET status = ?, url = ?, log = ?, error = ?, updated_at = ?,
+            published_at = ?, site_hash = ?, unpublished_at = ?
+      WHERE id = ?`,
+  ).run(
+    merged.status, merged.url, JSON.stringify(merged.log), merged.error, Date.now(),
+    merged.published_at ?? 0, merged.site_hash ?? "", merged.unpublished_at ?? 0,
+    id,
+  );
 }
 
 function log(id: string, line: string, status?: Deployment["status"]) {
@@ -146,32 +172,76 @@ async function runDeployment(
     const siteBase = `${origin.replace(/\/$/, "")}/s/${slug}`;
     const bundle = buildBundle(site, siteBase);
 
+    /* Built beside the live site, never on top of it.
+       ------------------------------------------------------------------
+       Writing straight into the served directory means deleting a working
+       website and then hoping: a failure halfway through — a disk full, an
+       unreadable photograph, the process being killed — used to leave the
+       public URL serving a half-written site with no way back.
+
+       So the new version is assembled under a staging name, and only once it
+       is complete does it change places with the live one. Both renames are
+       within one directory, so each is a single atomic operation as far as
+       any reader is concerned: a visitor sees the old site or the new one,
+       never a mixture. */
     log(id, "Building the site", "building");
     const target = path.join(PUBLISH_DIR, slug);
-    await rm(target, { recursive: true, force: true });
-    await mkdir(target, { recursive: true });
+    const staging = path.join(PUBLISH_DIR, `.staging-${id}`);
+    const previous = path.join(PUBLISH_DIR, `.previous-${id}`);
+    await rm(staging, { recursive: true, force: true });
+    await mkdir(staging, { recursive: true });
 
     let images = 0;
-    for (const file of bundle) {
-      const dest = path.join(target, file.name);
-      await mkdir(path.dirname(dest), { recursive: true });
-      if (file.kind === "text") {
-        await writeFile(dest, file.content, "utf8");
-      } else if (file.kind === "resize") {
-        if (existsSync(file.source)) await writeFile(dest, await resizedBytes(file));
-      } else if (existsSync(file.source)) {
-        await copyFile(file.source, dest);
-        images += 1;
+    try {
+      for (const file of bundle) {
+        const dest = path.join(staging, file.name);
+        await mkdir(path.dirname(dest), { recursive: true });
+        if (file.kind === "text") {
+          await writeFile(dest, file.content, "utf8");
+        } else if (file.kind === "resize") {
+          if (existsSync(file.source)) await writeFile(dest, await resizedBytes(file));
+        } else if (existsSync(file.source)) {
+          await copyFile(file.source, dest);
+          images += 1;
+        }
       }
+    } catch (err) {
+      // Nothing has been swapped in yet, so the live site is exactly as it
+      // was. Clear the half-built copy and report the real reason.
+      await rm(staging, { recursive: true, force: true });
+      throw err;
     }
     log(id, `${site.meta.locales.length} language${site.meta.locales.length === 1 ? "" : "s"}, ${images} image${images === 1 ? "" : "s"} bundled`);
+
+    const hadPrevious = existsSync(target);
+    try {
+      if (hadPrevious) await rename(target, previous);
+      await rename(staging, target);
+    } catch (err) {
+      // Put the old site back before giving up. The window in which neither
+      // exists is one rename wide and only reachable if the second rename
+      // fails, which is why the first thing the failure path does is undo it.
+      if (hadPrevious && existsSync(previous) && !existsSync(target)) {
+        await rename(previous, target).catch(() => {});
+      }
+      await rm(staging, { recursive: true, force: true });
+      throw err;
+    }
+    // The old version is only discarded once the new one is serving.
+    await rm(previous, { recursive: true, force: true });
 
     log(id, "Deploying", "deploying");
     await pause(400);
 
     if (platform === "builtin") {
       log(id, "Published");
-      update(id, { status: "live", url: `${siteBase}/` });
+      update(id, {
+        status: "live",
+        url: `${siteBase}/`,
+        published_at: Date.now(),
+        site_hash: siteFingerprint(site),
+        unpublished_at: 0,
+      });
       return;
     }
 
@@ -196,7 +266,13 @@ async function runDeployment(
       (line) => log(id, line),
     );
     log(id, "Published");
-    update(id, { status: "live", url });
+    update(id, {
+      status: "live",
+      url,
+      published_at: Date.now(),
+      site_hash: siteFingerprint(site),
+      unpublished_at: 0,
+    });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Deployment failed";
     update(id, { status: "failed", error: message });
@@ -268,6 +344,43 @@ async function zipSingleFile(html: string): Promise<Buffer> {
 }
 
 /**
+ * Take a published website down.
+ *
+ * The files go; the row stays. Keeping it means the slug stays reserved — so
+ * a client's bookmark cannot later land on somebody else's site — and the
+ * history of what was published when stays readable. Re-publishing reuses the
+ * same slug, so the URL a creator already gave out keeps working.
+ */
+export async function unpublish(projectId: string): Promise<boolean> {
+  const deployment = getLatestDeployment(projectId);
+  if (!deployment || deployment.status !== "live") return false;
+
+  if (deployment.platform === "builtin") {
+    await rm(path.join(PUBLISH_DIR, deployment.slug), { recursive: true, force: true });
+  }
+  // A Vercel or Netlify site is theirs to remove, from their dashboard: this
+  // application has no mandate to delete something on an account it merely
+  // holds a token for. The status says so rather than pretending.
+  update(deployment.id, { status: "unpublished", unpublished_at: Date.now(), error: null });
+  return true;
+}
+
+/**
+ * Whether the live site is behind the project's current document.
+ *
+ * Compared by fingerprint, so this is only true when the website itself would
+ * actually come out different.
+ */
+export function hasUnpublishedChanges(projectId: string, site: Site | null): boolean {
+  const deployment = getLatestDeployment(projectId);
+  if (!deployment || deployment.status !== "live" || !site) return false;
+  // A deployment from before fingerprints existed has nothing to compare, and
+  // claiming "changed" on no evidence would be a guess.
+  if (!deployment.site_hash) return false;
+  return deployment.site_hash !== siteFingerprint(site);
+}
+
+/**
  * Rewrites the published files for a project that is already live.
  *
  * Used after a menu sync so the customer-facing page reflects the spreadsheet
@@ -295,6 +408,9 @@ export async function refreshDeployment(projectId: string, site: Site): Promise<
         if (existsSync(file.source)) await writeFile(dest, await resizedBytes(file));
       } else if (existsSync(file.source)) await copyFile(file.source, dest);
     }
+    // The live site now matches this document, so say so — otherwise the
+    // project would keep claiming unpublished changes forever.
+    update(deployment.id, { site_hash: siteFingerprint(site), published_at: Date.now() });
     return deployment.url;
   } catch (err) {
     console.error("[deploy] refresh failed:", err);

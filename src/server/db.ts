@@ -154,6 +154,49 @@ function migrate(handle: Database.Database) {
     );
     CREATE INDEX IF NOT EXISTS deployments_project ON deployments(project_id, created_at DESC);
     CREATE UNIQUE INDEX IF NOT EXISTS deployments_slug ON deployments(slug);
+
+    /* A link a creator can send a client, pinned to one website version.
+       The id IS the capability: it is the only thing the client is given and
+       the only thing the public route accepts, so it is generated from
+       crypto-strong randomness and never derived from a project id. */
+    CREATE TABLE IF NOT EXISTS client_previews (
+      id          TEXT PRIMARY KEY,
+      project_id  TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      /* The exact document the client sees. An edit afterwards does not move
+         it, which is what makes an approval mean something. */
+      version_id  TEXT NOT NULL,
+      label       TEXT NOT NULL DEFAULT '',
+      revoked     INTEGER NOT NULL DEFAULT 0,
+      created_at  INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS client_previews_project
+      ON client_previews(project_id, created_at DESC);
+
+    /* What the client said about that exact version. */
+    CREATE TABLE IF NOT EXISTS client_responses (
+      id         TEXT PRIMARY KEY,
+      preview_id TEXT NOT NULL REFERENCES client_previews(id) ON DELETE CASCADE,
+      kind       TEXT NOT NULL,
+      message    TEXT NOT NULL DEFAULT '',
+      resolved   INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS client_responses_preview
+      ON client_responses(preview_id, created_at DESC);
+
+    /* A Google property connected to one project — an Analytics data stream
+       or a Search Console site. Credentials are never here: this names what
+       to ask about, and google_accounts holds the encrypted token. */
+    CREATE TABLE IF NOT EXISTS google_properties (
+      project_id   TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      service      TEXT NOT NULL,
+      property_id  TEXT NOT NULL,
+      property_name TEXT NOT NULL DEFAULT '',
+      /* Analytics only: the public G- id the website itself carries. */
+      measurement_id TEXT NOT NULL DEFAULT '',
+      created_at   INTEGER NOT NULL,
+      PRIMARY KEY (project_id, service)
+    );
   `);
 }
 
@@ -188,6 +231,14 @@ const COLUMNS: [table: string, column: string, ddl: string][] = [
   ["versions", "kind", "TEXT NOT NULL DEFAULT 'manual'"],
   // The version this one restored, when it was made by a rollback.
   ["versions", "restored_from", "TEXT NOT NULL DEFAULT ''"],
+  // When a deployment actually went live, and a fingerprint of the document
+  // that went with it — so "changes since publication" is a fact rather than
+  // a guess from timestamps that move for unrelated reasons.
+  ["deployments", "published_at", "INTEGER NOT NULL DEFAULT 0"],
+  ["deployments", "site_hash", "TEXT NOT NULL DEFAULT ''"],
+  // Set when the creator takes the site down; the row is kept so the slug
+  // stays reserved and the history stays readable.
+  ["deployments", "unpublished_at", "INTEGER NOT NULL DEFAULT 0"],
 ];
 
 function addColumns(handle: Database.Database) {

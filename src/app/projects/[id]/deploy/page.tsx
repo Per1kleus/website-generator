@@ -2,10 +2,13 @@ import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import { getCurrentUser } from "@/server/auth";
 import { getProject } from "@/server/projects";
-import { getLatestDeployment, platformAvailable, slugify } from "@/server/deploy";
+import {
+  getLatestDeployment, hasUnpublishedChanges, platformAvailable, slugify,
+} from "@/server/deploy";
+import { checkPublishable } from "@/server/publish-gate";
 import { DeployPanel } from "@/components/DeployPanel";
 
-export const metadata: Metadata = { title: "Deploy" };
+export const metadata: Metadata = { title: "Publish" };
 
 export default async function DeployPage({
   params,
@@ -26,6 +29,8 @@ export default async function DeployPage({
       businessName={project.business_name}
       defaultSlug={slugify(project.business_name)}
       initialDeployment={getLatestDeployment(id)}
+      initialGate={checkPublishable(id, project.site)}
+      initialHasChanges={hasUnpublishedChanges(id, project.site)}
       available={{
         builtin: true,
         vercel: platformAvailable("vercel"),
