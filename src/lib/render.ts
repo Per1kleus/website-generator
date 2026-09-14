@@ -64,7 +64,39 @@ export type RenderOptions = {
   baseUrl?: string;
   /** Absolute URL of this exact page, for canonical. */
   canonical?: string;
+  /**
+   * Emit the site's Analytics tag.
+   *
+   * Off everywhere by default, and switched on only when a site is written
+   * out for publication. A creator opening their own preview forty times
+   * while editing would otherwise be forty visits in their client's
+   * analytics, which is worse than no data.
+   */
+  analytics?: boolean;
 };
+
+/**
+ * The Google Analytics tag, or nothing at all.
+ *
+ * Nothing at all is the important half. A website with no configured property
+ * carries no tracking code, no consent banner and no third-party request —
+ * not a disabled snippet, not an empty id, nothing.
+ *
+ * What is emitted is the standard gtag.js loader with this project's own
+ * public measurement id. No token, no account id, no server address and no
+ * identifier belonging to whoever built the site.
+ */
+function analyticsTag(site: Site, opts: RenderOptions): string {
+  if (!opts.analytics) return "";
+  const id = site.meta.analytics?.measurementId?.trim() ?? "";
+  // Google's own format. Anything else is not a measurement id, and putting
+  // an unvalidated string into a script tag is how a document becomes a
+  // script-injection vector.
+  if (!/^G-[A-Z0-9]{4,20}$/.test(id)) return "";
+
+  return `<script async src="https://www.googletagmanager.com/gtag/js?id=${id}"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','${id}');</script>`;
+}
 
 function imageUrl(id: string, opts: RenderOptions, width?: number): string | null {
   if (!id) return null;
@@ -1082,6 +1114,7 @@ ${seo?.keywords?.length ? `<meta name="keywords" content="${esc(seo.keywords.joi
 <meta name="theme-color" content="${esc(site.theme.colors.primary)}">
 ${heroPreload(site, opts)}
 ${fontLinks(site)}
+${analyticsTag(site, opts)}
 <meta name="robots" content="index, follow">
 ${opts.canonical ? `<link rel="canonical" href="${esc(opts.canonical)}">` : ""}
 ${alternates}

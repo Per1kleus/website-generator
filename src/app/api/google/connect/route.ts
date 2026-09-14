@@ -2,7 +2,9 @@ import { randomBytes } from "node:crypto";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/server/auth";
-import { authorizeUrl, googleConfigured } from "@/server/google/oauth";
+import {
+  authorizeUrl, googleConfigured, OPTIONAL_SCOPES, type OptionalService,
+} from "@/server/google/oauth";
 import { isDesktop, selfOrigin } from "@/server/runtime";
 
 /** Starts the Google consent flow for the signed-in creator. */
@@ -46,7 +48,16 @@ export async function GET(req: Request) {
     maxAge: 600,
   });
 
-  const consent = authorizeUrl(origin, state);
+  /* Optional services ask for their own scopes on top of the base ones.
+     `include_granted_scopes=true` on the authorisation URL is what keeps this
+     additive: consenting to analytics does not drop Sheets access. */
+  const asked = (url.searchParams.get("services") ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s): s is OptionalService => s === "analytics" || s === "searchConsole");
+  const extra = asked.flatMap((service) => [...OPTIONAL_SCOPES[service]]);
+
+  const consent = authorizeUrl(origin, state, extra);
 
   // Google refuses OAuth inside an embedded webview, so a desktop build must
   // send the user to their own browser. The caller asks for the URL and the

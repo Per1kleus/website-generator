@@ -280,6 +280,22 @@ export type Site = {
     stickyCta: { enabled: boolean; href: string };
     /** Verified research, for honest metadata after generation. */
     facts?: BusinessFacts;
+    /**
+     * Google Analytics for this one website.
+     *
+     * The measurement id is public — it is in the page source of every site
+     * that uses Analytics — and it is per project, never a value baked into
+     * the application. Absent means the generated website carries no tracking
+     * code at all, which is the default and the common case.
+     *
+     * `consentAcknowledged` records that the creator has taken responsibility
+     * for whether this may run where their visitors are. It is not a claim
+     * that anything is lawful, and the application never makes one.
+     */
+    analytics?: {
+      measurementId: string;
+      consentAcknowledged: boolean;
+    };
   };
   theme: Theme;
   sections: Section[];

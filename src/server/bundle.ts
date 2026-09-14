@@ -72,6 +72,9 @@ export function buildBundle(site: Site, baseUrl?: string): BundleFile[] {
       locale,
       assetUrl: (id, width) => `../images/${id}${width ? `-${width}` : ""}.webp`,
       localeHref: abs ? (l) => localeUrl(l) : localeHref,
+      // The one place the Analytics tag is emitted: a site being written out
+      // for real. Previews stay untracked.
+      analytics: true,
       canonical: abs ? localeUrl(locale) : undefined,
       baseUrl: abs,
     });

@@ -34,6 +34,26 @@ export const SCOPES = [
 ];
 
 /**
+ * Scopes for things a creator may never ask for.
+ *
+ * Analytics and Search Console are optional features, so their permissions
+ * are requested when they are switched on rather than up front. Asking every
+ * creator for access to their analytics in order to build a menu from a
+ * spreadsheet would be both rude and a good reason to decline the whole
+ * consent screen.
+ *
+ * `include_granted_scopes=true` is already set on the authorisation URL, which
+ * is what makes this incremental: consenting to analytics keeps the Sheets and
+ * Drive access already granted rather than replacing it.
+ */
+export const OPTIONAL_SCOPES = {
+  analytics: ["https://www.googleapis.com/auth/analytics.readonly"],
+  searchConsole: ["https://www.googleapis.com/auth/webmasters.readonly"],
+} as const;
+
+export type OptionalService = keyof typeof OPTIONAL_SCOPES;
+
+/**
  * A desktop build uses a Google "Desktop app" OAuth client, which Google
  * documents as *not* confidential — its secret is not a secret once shipped.
  * The correct proof there is PKCE, so no client secret is required, and none
@@ -83,12 +103,12 @@ export function redirectUri(origin: string): string {
   );
 }
 
-export function authorizeUrl(origin: string, state: string): string {
+export function authorizeUrl(origin: string, state: string, extra: readonly string[] = []): string {
   const params = new URLSearchParams({
     client_id: process.env.GOOGLE_CLIENT_ID ?? "",
     redirect_uri: redirectUri(origin),
     response_type: "code",
-    scope: SCOPES.join(" "),
+    scope: [...SCOPES, ...extra].join(" "),
     // offline + consent so a refresh token is actually issued, otherwise a
     // sync would stop working an hour after connecting.
     access_type: "offline",
@@ -144,6 +164,9 @@ export type GoogleStatus = {
   /** Per-capability, from the granted scopes. */
   sheets: boolean;
   drive: boolean;
+  /** Optional services, granted only if the creator asked for them. */
+  analytics: boolean;
+  searchConsole: boolean;
   /** True when connected but something the app needs was not approved. */
   missingPermissions: boolean;
 };
@@ -155,8 +178,10 @@ export function connectionStatus(userId: string): GoogleStatus {
 
   const configured = googleConfigured();
   if (!row) {
-    return { configured, connected: false, email: "", sheets: false, drive: false,
-      missingPermissions: false };
+    return {
+      configured, connected: false, email: "", sheets: false, drive: false,
+      analytics: false, searchConsole: false, missingPermissions: false,
+    };
   }
 
   const granted = (row.scope ?? "").split(/\s+/).filter(Boolean);
@@ -174,6 +199,12 @@ export function connectionStatus(userId: string): GoogleStatus {
     email: row.email ?? "",
     sheets,
     drive,
+    // Never inferred from `unknown`: these are opt-in, so absence means the
+    // creator has not asked for them, not that an old row predates the field.
+    analytics: has(OPTIONAL_SCOPES.analytics[0]),
+    searchConsole: has(OPTIONAL_SCOPES.searchConsole[0]),
+    // Only the scopes every feature needs count as missing. An unconnected
+    // optional service is a choice, not a fault.
     missingPermissions: !sheets || !drive,
   };
 }

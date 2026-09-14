@@ -23,14 +23,36 @@ export class GoogleError extends Error {
   }
 }
 
-async function call(userId: string, url: string, accept = "application/json"): Promise<Response> {
+/**
+ * One authorised request to Google.
+ *
+ * Exported as `googleCall` so the Analytics and Search Console clients use
+ * this exact path — the same token fetch, the same timeout, the same
+ * translation of Google's status codes into something a person can act on.
+ * A second fetcher would eventually disagree with this one about what a 403
+ * means, and the disagreement would surface as a confusing error message.
+ *
+ * The token is fetched, used and dropped. It is never returned, logged or
+ * attached to anything that leaves the server.
+ */
+async function call(
+  userId: string,
+  url: string,
+  opts: { accept?: string; method?: "GET" | "POST"; body?: unknown } = {},
+): Promise<Response> {
   const token = await accessTokenFor(userId);
   if (!token) {
     throw new GoogleError("Your Google account is not connected.", 401, true);
   }
 
   const res = await fetch(url, {
-    headers: { Authorization: `Bearer ${token}`, Accept: accept },
+    method: opts.method ?? "GET",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: opts.accept ?? "application/json",
+      ...(opts.body ? { "Content-Type": "application/json" } : {}),
+    },
+    ...(opts.body ? { body: JSON.stringify(opts.body) } : {}),
     // Google is an external dependency inside a creator-initiated action;
     // fail fast rather than hanging the builder UI.
     signal: AbortSignal.timeout(20_000),
@@ -47,7 +69,7 @@ async function call(userId: string, url: string, accept = "application/json"): P
     );
   }
   if (res.status === 404) {
-    throw new GoogleError("That spreadsheet no longer exists, or was moved.", 404);
+    throw new GoogleError("Google could not find that — it may have been moved or removed.", 404);
   }
   if (res.status === 429) {
     throw new GoogleError("Google is rate-limiting this account. Try again shortly.", 429);
@@ -162,7 +184,10 @@ export async function downloadDriveFile(userId: string, fileId: string): Promise
   const res = await call(
     userId,
     `${DRIVE_BASE}/drive/v3/files/${encodeURIComponent(fileId)}?alt=media`,
-    "*/*",
+    { accept: "*/*" },
   );
   return Buffer.from(await res.arrayBuffer());
 }
+
+/** The shared request path, for the Analytics and Search Console clients. */
+export { call as googleCall };

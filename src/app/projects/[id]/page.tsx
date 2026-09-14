@@ -24,7 +24,9 @@ import { SITE_KINDS } from "@/lib/site";
 import { assessReadiness } from "@/lib/checklist";
 import { projectState, stateInfo } from "@/lib/project-status";
 import { renderSite } from "@/lib/render";
-import { getLatestDeployment } from "@/server/deploy";
+import { getLatestDeployment, hasUnpublishedChanges } from "@/server/deploy";
+import { approvalState } from "@/server/client-preview";
+import { getProperty } from "@/server/google/insights";
 
 export async function generateMetadata({
   params,
@@ -88,6 +90,11 @@ export default async function ProjectPage({
     }),
   );
   const questions = (identity?.questions ?? []).filter((q) => q?.question && q.options?.length);
+  // Read from the systems that own them, like every other figure here.
+  const approval = approvalState(id);
+  const changesPending = hasUnpublishedChanges(id, project.site);
+  const analyticsProperty = getProperty(id, "analytics");
+  const searchProperty = getProperty(id, "searchConsole");
   const errors = findings.filter((f) => f.level === "error");
   const warnings = findings.filter((f) => f.level === "warning");
 
@@ -107,7 +114,42 @@ export default async function ProjectPage({
     { href: `/projects/${id}/languages`, label: "Languages", hint: project.site ? project.site.meta.locales.map((l) => localeInfo(l).short).join(" · ") : "—", Icon: IconGlobe },
     { href: `/projects/${id}/versions`, label: "Versions", hint: `${versions.length} saved`, Icon: IconLayers },
     { href: `/projects/${id}/export`, label: "Export", hint: "Download a ZIP", Icon: IconDownload },
-    { href: `/projects/${id}/deploy`, label: "Deploy", hint: "Publish it live", Icon: IconRocket },
+    // Only offered once there is a website to show or publish, so the screen
+    // does not list actions that cannot do anything yet.
+    ...(project.site
+      ? [
+          {
+            href: `/projects/${id}/client-preview`,
+            label: "Client preview",
+            hint: approval.approvedVersion
+              ? `Approved · version ${approval.approvedVersion}`
+              : approval.openFeedback
+                ? `${approval.openFeedback} note${approval.openFeedback === 1 ? "" : "s"} to read`
+                : "Send it to your client",
+            Icon: IconEye,
+          },
+          {
+            href: `/projects/${id}/deploy`,
+            label: deployment?.status === "live" ? "Publish changes" : "Publish",
+            hint:
+              deployment?.status === "live"
+                ? changesPending
+                  ? "Changes not published yet"
+                  : "Live and up to date"
+                : "Put it online",
+            Icon: IconRocket,
+          },
+          {
+            href: `/projects/${id}/insights`,
+            label: "Analytics",
+            hint: [
+              analyticsProperty ? "Analytics" : null,
+              searchProperty ? "Search Console" : null,
+            ].filter(Boolean).join(" · ") || "Not connected",
+            Icon: IconGlobe,
+          },
+        ]
+      : []),
     { href: `/projects/${id}/settings`, label: "Settings", hint: "Business details", Icon: IconSettings },
   ];
 
@@ -139,6 +181,28 @@ export default async function ProjectPage({
               : readiness.performance.score >= 70
                 ? "warn"
                 : "bad",
+        },
+        {
+          label: "Published",
+          value:
+            deployment?.status === "live"
+              ? changesPending
+                ? "Changes pending"
+                : "Live"
+              : deployment?.status === "unpublished"
+                ? "Taken down"
+                : "Not published",
+          tone:
+            deployment?.status === "live" ? (changesPending ? "warn" : "good") : "warn",
+        },
+        {
+          label: "Client",
+          value: approval.approvedVersion
+            ? `Approved v${approval.approvedVersion}`
+            : approval.openFeedback
+              ? `${approval.openFeedback} open`
+              : "Not sent",
+          tone: approval.approvedVersion ? "good" : approval.openFeedback ? "warn" : "warn",
         },
       ]
     : [];
