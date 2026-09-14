@@ -1,9 +1,15 @@
-# Runs the four QA suites on every push and pull request.
+# Runs every QA suite on every push and pull request.
 #
-# Every suite starts the real application and drives it, so the job builds the
-# app first. None of them need an Anthropic key or a Google account: the
-# generator falls back when no key is present, and the Google suites talk to
-# scripts/mock-google.mjs.
+# The suites fall into three groups and the difference is what broke this
+# workflow for a long time: three of them drive a browser against an
+# application that has to be running already, and nothing here started one. The
+# mobile suite was the first step, so it failed on connection refused and every
+# suite after it never ran at all.
+#
+# So the job now starts the built application on port 3100, waits for it to
+# answer, and stops it at the end. None of the suites need a Gemini key or a
+# Google account: the generator falls back when no key is present, and the
+# hosted-AI and Google suites drive their own stubs.
 name: CI
 
 on:
@@ -20,7 +26,7 @@ jobs:
   test:
     name: Build and QA
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
@@ -45,20 +51,66 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Mobile suite
-        run: npm run test:mobile
+      # --- suites that need nothing running ------------------------------
+      - name: Site suite
+        run: npm run test:site
+      - name: Design systems suite
+        run: npm run test:design-systems
+
+      # --- suites that start their own server ----------------------------
       - name: Design engine suite
         run: npm run test:design
       - name: Menu data suite
         run: npm run test:menu
-      - name: Desktop packaging suite
-        run: npm run test:desktop
-      - name: First-launch setup suite
-        run: npm run test:setup
       - name: Gemini suite
         run: npm run test:gemini
-      - name: Design systems suite
-        run: npm run test:design-systems
+      - name: First-launch setup suite
+        run: npm run test:setup
+      - name: Desktop packaging suite
+        run: npm run test:desktop
+
+      # --- suites that drive a running application -----------------------
+      #
+      # Its data directory is a scratch one, so a suite that creates projects
+      # never writes into the checkout. Health is polled rather than slept on:
+      # a fixed wait is either too short on a slow runner or wasted on a fast
+      # one, and a server that failed to start must fail here rather than
+      # thirty seconds later as a connection error inside a test.
+      - name: Start the application on port 3100
+        run: |
+          mkdir -p "$RUNNER_TEMP/wg-data"
+          WG_DATA_DIR="$RUNNER_TEMP/wg-data" npx next start -p 3100 \
+            > "$RUNNER_TEMP/app.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/app.pid"
+          for _ in $(seq 1 60); do
+            if curl -sf http://localhost:3100/api/health > /dev/null; then
+              echo "the application is up"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "the application did not start:"
+          cat "$RUNNER_TEMP/app.log"
+          exit 1
+
+      - name: Preview suite
+        run: npm run test:preview
+      - name: Studio suite
+        run: npm run test:studio
+      - name: Mobile suite
+        run: npm run test:mobile
+
+      - name: Stop the application
+        if: always()
+        run: kill "$(cat "$RUNNER_TEMP/app.pid")" 2>/dev/null || true
+
+      - name: Upload the application log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-log
+          path: ${{ runner.temp }}/app.log
+          if-no-files-found: ignore
 
       - name: Upload QA screenshots
         if: always()
@@ -88,6 +140,16 @@ jobs:
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: desktop/tauri/src-tauri
+
+      # tauri-build refuses to configure an app whose declared sidecar is
+      # missing, and the real one is a 120 MB Node runtime that the packaging
+      # script stages and version control rightly does not carry. An empty file
+      # is enough to satisfy that check — this job compiles the shell, it does
+      # not bundle or run it — and without it `cargo check` cannot even start.
+      - name: Placeholder for the Node sidecar
+        run: |
+          mkdir -p desktop/tauri/src-tauri/binaries
+          : > desktop/tauri/src-tauri/binaries/wg-node-x86_64-unknown-linux-gnu
 
       - name: cargo check
         working-directory: desktop/tauri/src-tauri
