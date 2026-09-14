@@ -1,8 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { Card } from "./ui";
+import { useRouter } from "next/navigation";
+import { Button, Card } from "./ui";
 import { IconAlert, IconCheck } from "./icons";
+import { fixableIssues } from "@/lib/checklist";
 import type { CategoryId, CategoryResult, ReadinessReport, Severity } from "@/lib/checklist";
 
 /**
@@ -59,9 +61,46 @@ export function ReadinessCard({
   report: ReadinessReport;
   projectId: string;
 }) {
+  const router = useRouter();
   const [open, setOpen] = useState<CategoryId | null>(null);
+  const [fixing, setFixing] = useState(false);
+  const [fixed, setFixed] = useState("");
   const style = STATUS_STYLE[report.status];
   const criticals = report.issues.filter((i) => i.severity === "critical").length;
+  const fixable = fixableIssues(report);
+
+  /**
+   * Apply the corrections this application is allowed to make on its own.
+   *
+   * Nothing the business wrote is touched — every one of these changes a
+   * design decision the application made in the first place. The document as
+   * it stands is saved first, so the button is reversible from history.
+   */
+  async function fixAll() {
+    setFixing(true);
+    setFixed("");
+    try {
+      const res = await fetch(`/api/projects/${projectId}/fix`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) {
+        setFixed(data.error ?? "Could not apply the fixes.");
+        return;
+      }
+      const applied = (data.applied ?? []) as { what: string }[];
+      setFixed(
+        applied.length
+          ? `Fixed ${applied.length} issue${applied.length === 1 ? "" : "s"}.`
+          : "Nothing could be fixed automatically.",
+      );
+      // The score, the preview and the project state all derive from the
+      // document that just changed.
+      if (applied.length) router.refresh();
+    } catch {
+      setFixed("Could not reach the server.");
+    } finally {
+      setFixing(false);
+    }
+  }
 
   return (
     <Card className={`my-4 border ${style.ring}`}>
@@ -82,6 +121,23 @@ export function ReadinessCard({
         <p className="mt-2 text-[0.6875rem] text-muted">
           This application&rsquo;s own deterministic score — not a Lighthouse result.
         </p>
+
+        {fixable.length > 0 && (
+          <div className="mt-3" data-readiness-fixable={fixable.length}>
+            <Button size="lg" loading={fixing} onClick={fixAll} data-readiness-fix>
+              Fix {fixable.length} issue{fixable.length === 1 ? "" : "s"} automatically
+            </Button>
+            <p className="mt-1.5 text-[0.6875rem] text-muted">
+              Only design decisions this app made — your own words are never
+              rewritten. The current version is kept in history.
+            </p>
+          </div>
+        )}
+        {fixed && (
+          <p className="mt-2 text-xs font-semibold text-success" data-readiness-fixed>
+            {fixed}
+          </p>
+        )}
       </div>
 
       <ul className="mt-4 space-y-1">

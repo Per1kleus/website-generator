@@ -22,12 +22,18 @@ export function MediaManager({
   projectId,
   businessName,
   initialAssets,
+  initialLogoId = "",
 }: {
   projectId: string;
   businessName: string;
   initialAssets: Asset[];
+  /** The logo currently on the website, if it has one. */
+  initialLogoId?: string;
 }) {
   const [assets, setAssets] = useState<Asset[]>(initialAssets);
+  const [logoId, setLogoId] = useState(initialLogoId);
+  const [logoBusy, setLogoBusy] = useState(false);
+  const logoRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState("");
   const [uploading, setUploading] = useState<{ name: string; done: number; total: number } | null>(null);
   const { toast, toastNode } = useToast();
@@ -79,6 +85,39 @@ export function MediaManager({
     }
   }
 
+  /**
+   * Replace the logo.
+   *
+   * The same upload endpoint as any other image, with `role=logo`, which is
+   * what routes it through the logo path: a larger size cap, alpha preserved,
+   * SVG accepted and sanitised. The server also points the live document at
+   * the new asset, so the change reaches the website and not just this screen.
+   */
+  async function replaceLogo(files: FileList | null) {
+    const file = files?.[0];
+    if (!file) return;
+    setLogoBusy(true);
+    setError("");
+    try {
+      const body = new FormData();
+      body.append("file", file);
+      body.append("role", "logo");
+      body.append("alt", `${businessName} logo`);
+      const res = await fetch(`/api/projects/${projectId}/assets`, { method: "POST", body });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error ?? "That logo could not be uploaded.");
+        return;
+      }
+      setLogoId(data.asset.id as string);
+      toast("Logo replaced");
+    } catch {
+      setError("Could not upload that logo. Check your connection and try again.");
+    } finally {
+      setLogoBusy(false);
+    }
+  }
+
   const sources = [
     { label: "Take photo", hint: "Use the camera", Icon: IconCamera, ref: cameraRef },
     { label: "Choose from gallery", hint: "Your photo library", Icon: IconImage, ref: libraryRef },
@@ -104,6 +143,50 @@ export function MediaManager({
         ref={fileRef} type="file" multiple
         className="hidden" onChange={(e) => { void upload(e.target.files); e.target.value = ""; }}
       />
+
+      {/* The logo is not one of the photographs: it is the brand mark, it has
+          its own upload rules, and it is the thing people most often want to
+          change after seeing the finished site. */}
+      <input
+        ref={logoRef} type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml,.svg"
+        className="hidden" onChange={(e) => { void replaceLogo(e.target.files); e.target.value = ""; }}
+      />
+      <section className="my-4" data-logo-card data-logo-id={logoId}>
+        <Card>
+          <h2 className="font-bold">Logo</h2>
+          <div className="mt-3 flex items-center gap-3">
+            {logoId ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={`/api/assets/${logoId}?w=240`}
+                alt={`${businessName} logo`}
+                className="h-14 w-14 shrink-0 object-contain"
+              />
+            ) : (
+              <span
+                aria-hidden="true"
+                className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-elevated text-muted"
+              >
+                <IconImage size={22} />
+              </span>
+            )}
+            <p className="min-w-0 flex-1 text-sm text-muted">
+              {logoId
+                ? "Shown in the header and used as the favicon. A replacement keeps its own proportions."
+                : "Optional. Adding one puts it in the header and uses it as the favicon."}
+            </p>
+          </div>
+          <button
+            type="button"
+            disabled={logoBusy}
+            onClick={() => logoRef.current?.click()}
+            data-logo-replace
+            className="mt-3 flex min-h-[var(--spacing-touch)] w-full items-center justify-center gap-2 rounded-card border border-dashed border-line text-sm font-semibold text-brand hover:bg-elevated active:bg-elevated disabled:opacity-50"
+          >
+            <IconImage size={18} /> {logoBusy ? "Uploading…" : logoId ? "Replace logo" : "Add a logo"}
+          </button>
+        </Card>
+      </section>
 
       <div className="my-4 grid gap-2.5">
         {sources.map(({ label, hint, Icon, ref }) => (

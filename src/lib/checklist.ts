@@ -1,4 +1,5 @@
 import { assessPerformance, type PerfReport } from "./performance";
+import { isCorrectable } from "./qa-fix";
 import { auditSeo, isPlaceholder } from "./seo";
 import { auditSite, type QaReport } from "./visual-qa";
 import { contrastRatio, readableOn } from "./contrast";
@@ -72,6 +73,21 @@ export type CheckIssue = {
   /** Points removed from the category. Info findings always cost nothing. */
   cost: number;
 };
+
+/**
+ * The issues this application can fix by itself, safely.
+ *
+ * "Safely" has a precise meaning here: `lib/qa-fix.ts` only ever changes a
+ * design decision this application made in the first place — a heading scale,
+ * a line length, the rhythm, which photograph leads the page, whether an empty
+ * section is shown. It never edits a word the business wrote. That is why
+ * these can be offered as a button and the rest cannot.
+ */
+export function fixableIssues(report: ReadinessReport): CheckIssue[] {
+  return report.issues.filter(
+    (i) => i.id.startsWith("qa:") && isCorrectable(i.id.slice(3)),
+  );
+}
 
 export type CategoryResult = {
   id: CategoryId;

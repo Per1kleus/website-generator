@@ -2,18 +2,21 @@
 
 import { useCallback, useRef, useState } from "react";
 import { AppShell } from "./AppShell";
-import { AppBar, Banner, Button, Card, LinkButton, useToast } from "./ui";
+import { AppBar, Banner, BottomSheet, Button, Card, LinkButton, useToast } from "./ui";
 import { SectionSheet } from "./SectionSheet";
 import { AiSheet } from "./AiSheet";
 import { LocaleTabs } from "./LocaleTabs";
 import { SitePreview, type PreviewHandle } from "./SitePreview";
 import { SeoFields } from "./SeoFields";
-import { IconDown, IconDrag, IconEye, IconEyeOff, IconPencil, IconSparkles, IconUp } from "./icons";
+import {
+  IconDown, IconDrag, IconEye, IconEyeOff, IconPencil, IconPlus, IconSparkles,
+  IconTrash, IconUp,
+} from "./icons";
 import { localeInfo, type Locale } from "@/lib/locales";
 import {
-  SECTION_EMOJI, missingKeys, moveSection, reorderSections,
-  sectionSummary, sectionTitle,
-  type Section, type Site,
+  SECTION_EMOJI, SECTION_LABELS, addSection, addableSectionTypes, missingKeys,
+  moveSection, removeSection, reorderSections, sectionSummary, sectionTitle,
+  type Section, type SectionType, type Site,
 } from "@/lib/site";
 
 export type AssetRef = { id: string; filename: string; alt: string };
@@ -51,6 +54,8 @@ export function SectionEditor({
   const [site, setSite] = useState<Site>(initialSite);
   const [locale, setLocale] = useState<Locale>(initialSite.meta.defaultLocale);
   const [editing, setEditing] = useState<Section | null>(null);
+  const [addOpen, setAddOpen] = useState(false);
+  const [removing, setRemoving] = useState<string | null>(null);
   const [aiOpen, setAiOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
@@ -108,6 +113,31 @@ export function SectionEditor({
     const next = { ...site, sections };
     applyLocal(next);
     void persist(next, dir === -1 ? "Moved up" : "Moved down");
+  }
+
+  const addable = addableSectionTypes(site.sections);
+
+  function onAdd(type: SectionType) {
+    const next = addSection(site, type);
+    setAddOpen(false);
+    applyLocal(next);
+    void persist(next, `${SECTION_LABELS[type]} added`);
+  }
+
+  /**
+   * Remove a section, once.
+   *
+   * Confirmed rather than undoable-in-place, because the strings go with it —
+   * but the version history keeps the document as it was a moment ago, so
+   * nothing is actually lost.
+   */
+  function onRemove(id: string) {
+    const section = site.sections.find((x) => x.id === id);
+    if (!section) return;
+    const next = removeSection(site, id);
+    setRemoving(null);
+    applyLocal(next);
+    void persist(next, `${SECTION_LABELS[section.type]} removed`);
   }
 
   function onToggleVisible(id: string) {
@@ -288,11 +318,81 @@ export function SectionEditor({
                   {section.visible ? <IconEyeOff size={16} /> : <IconEye size={16} />}
                   {section.visible ? "Hide" : "Show"}
                 </button>
+                <button
+                  type="button"
+                  onClick={() => setRemoving(section.id)}
+                  aria-label={`Remove ${title}`}
+                  data-section-remove
+                  className="flex min-h-[var(--spacing-touch)] flex-1 items-center justify-center gap-1.5 rounded-lg text-xs font-semibold text-danger hover:bg-elevated active:bg-elevated"
+                >
+                  <IconTrash size={16} /> Remove
+                </button>
               </div>
             </li>
           );
         })}
       </ul>
+
+      {addable.length > 0 && (
+        <Button
+          variant="secondary"
+          size="lg"
+          block
+          className="mt-3"
+          onClick={() => setAddOpen(true)}
+          data-section-add
+        >
+          <IconPlus size={18} /> Add a section
+        </Button>
+      )}
+
+      <BottomSheet open={addOpen} onClose={() => setAddOpen(false)} title="Add a section">
+        <p className="pb-3 text-sm text-muted">
+          It is added above the footer, empty, for you to fill in. The design,
+          spacing and typography come from this site&rsquo;s own design system.
+        </p>
+        <div className="grid gap-2 pb-2">
+          {addable.map((type) => (
+            <button
+              key={type}
+              type="button"
+              onClick={() => onAdd(type)}
+              data-section-add-type={type}
+              className="flex min-h-[var(--spacing-touch-lg)] items-center gap-3 rounded-card border border-line bg-surface p-3 text-left hover:bg-elevated active:bg-elevated"
+            >
+              <span aria-hidden="true" className="text-xl">{SECTION_EMOJI[type]}</span>
+              <span className="font-semibold">{SECTION_LABELS[type]}</span>
+            </button>
+          ))}
+        </div>
+      </BottomSheet>
+
+      <BottomSheet
+        open={Boolean(removing)}
+        onClose={() => setRemoving(null)}
+        title="Remove this section?"
+        footer={
+          <div className="flex gap-2.5">
+            <Button variant="secondary" size="lg" className="flex-1" onClick={() => setRemoving(null)}>
+              Keep it
+            </Button>
+            <Button
+              variant="danger"
+              size="lg"
+              className="flex-1"
+              data-section-remove-confirm
+              onClick={() => removing && onRemove(removing)}
+            >
+              Remove
+            </Button>
+          </div>
+        }
+      >
+        <p className="pb-2 text-sm text-muted">
+          Its content is removed in every language. The previous version is kept
+          in this project&rsquo;s history, so this can be undone by restoring it.
+        </p>
+      </BottomSheet>
 
       <div className="sticky bottom-0 z-30 mt-4 flex gap-2 border-t border-line bg-canvas/95 py-3 backdrop-blur-lg">
             <Button className="flex-1" size="lg" onClick={() => setAiOpen(true)}>

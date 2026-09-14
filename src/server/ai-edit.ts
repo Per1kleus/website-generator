@@ -1,7 +1,7 @@
 import "server-only";
 import { ARCHITECTURE_IDS, architecture } from "@/lib/architectures";
 import { isSupportedLocale, LOCALES, localeInfo, type Locale } from "@/lib/locales";
-import { emptyCatalog, key, newId, type Section, type Site } from "@/lib/site";
+import { emptyCatalog, key, newId, normaliseSection, type Section, type Site } from "@/lib/site";
 import { PALETTES } from "@/lib/styles";
 import { tokensForArchitecture } from "@/lib/tokens";
 import { contrastRatio } from "./identity";
@@ -290,10 +290,16 @@ const HEX = /^#[0-9a-f]{6}$/i;
 
 export function validateSiteDoc(candidate: Site, previous: Site): Site {
   const sections = Array.isArray(candidate.sections) ? candidate.sections : previous.sections;
-  const clean = sections.filter(
-    (s): s is Section =>
-      Boolean(s) && typeof s === "object" && typeof s.id === "string" && ALLOWED_TYPES.has(s.type),
-  );
+  const clean = sections
+    .filter(
+      (s): s is Section =>
+        Boolean(s) && typeof s === "object" && typeof s.id === "string" && ALLOWED_TYPES.has(s.type),
+    )
+    // Having the right id and type is not the same as being renderable. A
+    // section missing the array its type requires would pass the filter and
+    // then throw in the renderer, so every one is completed against a blank
+    // of its own type before it is accepted.
+    .map(normaliseSection);
 
   const pc = previous.theme.colors;
   const cc = candidate.theme?.colors ?? pc;

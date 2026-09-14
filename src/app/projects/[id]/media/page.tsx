@@ -22,7 +22,8 @@ export default async function MediaPage({
     <MediaManager
       projectId={id}
       businessName={project.business_name}
-      initialAssets={listAssets(id)}
+      initialAssets={listAssets(id, "photo")}
+      initialLogoId={project.site?.meta.logo?.assetId ?? project.logo_asset_id ?? ""}
     />
   );
 }

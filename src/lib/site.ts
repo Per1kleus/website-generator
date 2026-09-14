@@ -487,6 +487,146 @@ export function reorderSections(sections: Section[], from: number, to: number): 
   return next;
 }
 
+/**
+ * An empty section of a given type, structurally complete.
+ *
+ * "Structurally complete" is the whole point: a section is a tagged union, and
+ * a `services` section without its `items` array is not a services section
+ * that happens to be empty — it is a document the renderer and the validator
+ * will disagree about. So every variant is spelled out rather than built by
+ * spreading a shared blank, which is what would let a field quietly go
+ * missing when the union changes.
+ *
+ * Nothing here is translated. The strings are added per locale by
+ * `addSection`, which knows which languages the document has.
+ */
+export function blankSection(type: SectionType, id = newId()): Section {
+  const base = { id, visible: true } as const;
+  switch (type) {
+    case "hero":
+      return { ...base, type, ctaHref: "", secondaryHref: "", imageId: "" };
+    case "about":
+      return { ...base, type, imageId: "", highlights: [] };
+    case "services":
+      return { ...base, type, items: [] };
+    case "menu":
+      return { ...base, type, categories: [] };
+    case "gallery":
+      return { ...base, type, imageIds: [] };
+    case "hours":
+      return { ...base, type, rows: [] };
+    case "testimonials":
+      return { ...base, type, items: [] };
+    case "cta":
+      return { ...base, type, ctaHref: "" };
+    case "contact":
+      return { ...base, type, phone: "", email: "", mapsUrl: "", bookingUrl: "" };
+    case "footer":
+      return { ...base, type, links: [] };
+  }
+}
+
+/**
+ * A section from outside, made structurally sound.
+ *
+ * Anything arriving from a client or a model may be missing the arrays its
+ * type requires — `{id, type: "services"}` with no `items` is the shape that
+ * renders as a crash rather than as an empty list. Filling from a blank of the
+ * same type guarantees every field the renderer reads exists, while keeping
+ * whatever the caller genuinely sent. An array-shaped field that arrives as
+ * something else is replaced rather than trusted.
+ */
+export function normaliseSection(candidate: Section): Section {
+  const blank = blankSection(candidate.type, candidate.id) as Record<string, unknown>;
+  const given = candidate as unknown as Record<string, unknown>;
+  const out: Record<string, unknown> = { ...blank };
+
+  for (const [field, fallback] of Object.entries(blank)) {
+    const value = given[field];
+    if (value === undefined) continue;
+    if (Array.isArray(fallback) && !Array.isArray(value)) continue;
+    if (typeof fallback === "string" && typeof value !== "string") continue;
+    if (typeof fallback === "boolean" && typeof value !== "boolean") continue;
+    out[field] = value;
+  }
+  // `layout` is optional and shared across the union, so it is not on the
+  // blank; carry it when it is there.
+  if (given.layout !== undefined) out.layout = given.layout;
+
+  return out as unknown as Section;
+}
+
+/**
+ * Section types a creator may add to this document.
+ *
+ * A page has one hero and one footer — they are the top and the bottom, not
+ * content — so neither can be added twice. A hidden section already exists
+ * and is offered as "show it again" rather than as a second copy, which is
+ * the difference between a document that stays coherent and one that
+ * accumulates duplicates nobody meant to create.
+ */
+export function addableSectionTypes(sections: Section[]): SectionType[] {
+  const present = new Set(sections.map((s) => s.type));
+  const singular: SectionType[] = ["hero", "footer", "contact", "about", "cta", "hours"];
+  return (Object.keys(SECTION_LABELS) as SectionType[]).filter(
+    (type) => !(singular.includes(type) && present.has(type)),
+  );
+}
+
+/**
+ * Add a section, with a readable title in every language the site has.
+ *
+ * It goes before the footer rather than at the end, because a section after
+ * the footer is never what anyone meant. The title is the English label in
+ * every locale: inventing a translation here would be fabricating content,
+ * and an untranslated title a creator can see and edit is honest.
+ */
+export function addSection(site: Site, type: SectionType): Site {
+  const section = blankSection(type);
+  const footerAt = site.sections.findIndex((s) => s.type === "footer");
+  const sections = site.sections.slice();
+  sections.splice(footerAt >= 0 ? footerAt : sections.length, 0, section);
+
+  const i18n = { ...site.i18n };
+  for (const locale of site.meta.locales) {
+    const catalog = i18n[locale];
+    if (!catalog) continue;
+    i18n[locale] = {
+      ...catalog,
+      strings: { ...catalog.strings, [key.section(section.id, "title")]: SECTION_LABELS[type] },
+    };
+  }
+
+  return { ...site, sections, i18n };
+}
+
+/**
+ * Remove a section and the strings that belonged to it.
+ *
+ * Leaving the strings behind would grow the document every time someone
+ * changed their mind, and they can never be reached again — the key is
+ * anchored to a section id that no longer exists.
+ */
+export function removeSection(site: Site, id: string): Site {
+  const section = site.sections.find((s) => s.id === id);
+  if (!section) return site;
+
+  const prefix = `${id}.`;
+  const i18n = { ...site.i18n };
+  for (const locale of Object.keys(i18n) as Locale[]) {
+    const catalog = i18n[locale];
+    if (!catalog) continue;
+    i18n[locale] = {
+      ...catalog,
+      strings: Object.fromEntries(
+        Object.entries(catalog.strings).filter(([k]) => !k.startsWith(prefix)),
+      ),
+    };
+  }
+
+  return { ...site, sections: site.sections.filter((s) => s.id !== id), i18n };
+}
+
 export function sectionTitle(site: Site, locale: Locale, section: Section): string {
   return t(site, locale, key.section(section.id, "title")) || SECTION_LABELS[section.type];
 }

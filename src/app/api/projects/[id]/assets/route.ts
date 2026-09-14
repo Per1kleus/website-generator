@@ -4,7 +4,9 @@ import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import sharp from "sharp";
 import { getCurrentUser } from "@/server/auth";
-import { getProject, insertAsset, listAssets, setLogo } from "@/server/projects";
+import {
+  getProject, insertAsset, listAssets, saveVersion, setLogo, updateProjectSite,
+} from "@/server/projects";
 import { focalPoint } from "@/server/images";
 import { UPLOAD_DIR } from "@/server/db";
 import { sanitiseSvg } from "@/server/svg";
@@ -42,7 +44,8 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   if (!user) return NextResponse.json({ error: "Not signed in." }, { status: 401 });
 
   const { id } = await ctx.params;
-  if (!getProject(id, user.id)) return NextResponse.json({ error: "Not found." }, { status: 404 });
+  const project = getProject(id, user.id);
+  if (!project) return NextResponse.json({ error: "Not found." }, { status: 404 });
 
   const form = await req.formData();
   const file = form.get("file");
@@ -140,7 +143,35 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     focal_y: focal.y,
   });
 
-  if (role === "logo") setLogo(id, user.id, assetId);
+  if (role === "logo") {
+    setLogo(id, user.id, assetId);
+
+    // A generated site carries its own logo reference, and that is what the
+    // renderer reads. Updating only the project row would change the logo
+    // everywhere except on the actual website — so replacing it after
+    // generation has to reach the document too.
+    //
+    // The height stays at the design system's value and the width is left to
+    // follow from it (the stylesheet sets `width:auto`), so a replacement of a
+    // different shape keeps its aspect ratio instead of being squashed into
+    // the previous one's box.
+    if (project.site) {
+      const previous = project.site.meta.logo;
+      const site = {
+        ...project.site,
+        meta: {
+          ...project.site.meta,
+          logo: {
+            assetId,
+            height: previous?.height ?? 36,
+            transparent: Boolean(hasAlpha),
+          },
+        },
+      };
+      saveVersion(id, "Logo replaced", project.site);
+      updateProjectSite(id, user.id, site);
+    }
+  }
 
   return NextResponse.json({ ok: true, asset });
 }
