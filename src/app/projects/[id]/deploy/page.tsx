@@ -2,9 +2,10 @@ import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import { getCurrentUser } from "@/server/auth";
 import { getProject } from "@/server/projects";
-import {
-  getLatestDeployment, hasUnpublishedChanges, platformAvailable, slugify,
-} from "@/server/deploy";
+import { getLatestDeployment, hasUnpublishedChanges, slugify } from "@/server/deploy";
+import { publicView } from "@/server/deploy-view";
+import { availability } from "@/server/providers";
+import { connectionStatus as githubStatus } from "@/server/github/oauth";
 import { checkPublishable } from "@/server/publish-gate";
 import { DeployPanel } from "@/components/DeployPanel";
 
@@ -28,14 +29,14 @@ export default async function DeployPage({
       projectId={id}
       businessName={project.business_name}
       defaultSlug={slugify(project.business_name)}
-      initialDeployment={getLatestDeployment(id)}
+      // Filtered on the way out, like every other deployment response: the
+      // screen gets the fields it draws and nothing else.
+      initialDeployment={publicView(getLatestDeployment(id))}
       initialGate={checkPublishable(id, project.site)}
       initialHasChanges={hasUnpublishedChanges(id, project.site)}
-      available={{
-        builtin: true,
-        vercel: platformAvailable("vercel"),
-        netlify: platformAvailable("netlify"),
-      }}
+      available={availability(user.id)}
+      // Whether GitHub is connected, and how. Never the token.
+      github={githubStatus(user.id)}
     />
   );
 }

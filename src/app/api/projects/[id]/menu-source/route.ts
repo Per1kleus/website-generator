@@ -111,7 +111,9 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
 
   // Push the new data to an already-live site. Only the menu content changes;
   // the design is regenerated from the same unchanged theme.
-  const published = await refreshDeployment(id, result.site);
+  const published = await refreshDeployment(
+    id, result.site, user.id, new URL(req.url).origin,
+  );
 
   return NextResponse.json({
     ok: true,

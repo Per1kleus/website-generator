@@ -5,7 +5,10 @@ import { useMounted } from "./LocalTime";
 import { AppShell } from "./AppShell";
 import { AppBar, Banner, Button, Card, Field, Select, TextInput, useToast } from "./ui";
 import { IconCheck, IconCopy, IconExternal, IconRocket } from "./icons";
-import type { Deployment, DeployPlatform } from "@/server/deploy";
+import { CustomDomain } from "./CustomDomain";
+import type { DeploymentView } from "@/server/deploy-view";
+import type { DeployPlatform } from "@/server/deploy";
+import type { GitHubStatus } from "@/server/github/oauth";
 
 /**
  * Deployment from a phone (requirement 13).
@@ -16,7 +19,7 @@ import type { Deployment, DeployPlatform } from "@/server/deploy";
  * actions the requirement asks for — Open website and Copy URL.
  */
 
-const STAGES: { key: Deployment["status"]; label: string }[] = [
+const STAGES: { key: DeploymentView["status"]; label: string }[] = [
   { key: "preparing", label: "Preparing" },
   { key: "building", label: "Building" },
   { key: "deploying", label: "Deploying" },
@@ -62,22 +65,34 @@ export function DeployPanel({
   initialGate,
   initialHasChanges = false,
   available,
+  github,
 }: {
   projectId: string;
   businessName: string;
   defaultSlug: string;
-  initialDeployment: Deployment | null;
+  initialDeployment: DeploymentView | null;
   /** Whether publishing would be refused, and why. Computed on the server. */
   initialGate?: PublishGate | null;
   initialHasChanges?: boolean;
   available: Record<DeployPlatform, boolean>;
+  /** Whether GitHub is connected, and how. Never a token. */
+  github?: GitHubStatus;
 }) {
   const [gate, setGate] = useState<PublishGate | null>(initialGate ?? null);
   const [hasChanges, setHasChanges] = useState(initialHasChanges);
   const [showIssues, setShowIssues] = useState(false);
-  const [platform, setPlatform] = useState<DeployPlatform>("builtin");
+  /* The provider a creator last published with is the one they mean next
+     time. Starting a live GitHub project back on "Built-in hosting" would be
+     one absent-minded press away from a second website at a second address.
+     A project that has never been published starts where it always did — a
+     configured provider must not change what an unattended press does. */
+  const [platform, setPlatform] = useState<DeployPlatform>(
+    initialDeployment?.platform ?? "builtin",
+  );
+  const [connection, setConnection] = useState<GitHubStatus | undefined>(github);
+  const [platforms, setPlatforms] = useState(available);
   const [slug, setSlug] = useState(initialDeployment?.slug ?? defaultSlug);
-  const [deployment, setDeployment] = useState<Deployment | null>(initialDeployment);
+  const [deployment, setDeployment] = useState<DeploymentView | null>(initialDeployment);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const { toast, toastNode } = useToast();
@@ -90,9 +105,11 @@ export function DeployPanel({
       const res = await fetch(`/api/projects/${projectId}/deploy`, { cache: "no-store" });
       if (!res.ok) return;
       const data = await res.json();
-      setDeployment(data.deployment as Deployment | null);
+      setDeployment(data.deployment as DeploymentView | null);
       if (data.gate) setGate(data.gate as PublishGate);
       if (typeof data.hasChanges === "boolean") setHasChanges(data.hasChanges);
+      if (data.available) setPlatforms(data.available as Record<DeployPlatform, boolean>);
+      if (data.github) setConnection(data.github as GitHubStatus);
     } catch {
       /* transient offline: keep the last known state and retry on next tick */
     }
@@ -129,7 +146,7 @@ export function DeployPanel({
         setError(data.error ?? "Could not start the deployment.");
         return;
       }
-      setDeployment(data.deployment as Deployment);
+      setDeployment(data.deployment as DeploymentView);
     } catch {
       setError("Could not reach the server. Check your connection and try again.");
     } finally {
@@ -151,10 +168,31 @@ export function DeployPanel({
         setError(data.error ?? "Could not take the website down.");
         return;
       }
-      setDeployment(data.deployment as Deployment | null);
+      setDeployment(data.deployment as DeploymentView | null);
       toast("Website taken down");
     } catch {
       setError("Could not reach the server. Check your connection and try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /** One helper for the three domain actions: they differ only in payload. */
+  async function domainAction(body: Record<string, unknown>): Promise<string> {
+    setBusy(true);
+    setError("");
+    try {
+      const res = await fetch(`/api/projects/${projectId}/deploy`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) return String(data.error ?? "That did not work.");
+      if (data.deployment) setDeployment(data.deployment as DeploymentView);
+      return "";
+    } catch {
+      return "Could not reach the server. Check your connection and try again.";
     } finally {
       setBusy(false);
     }
@@ -279,13 +317,63 @@ export function DeployPanel({
             </div>
           </dl>
 
-          {/* Custom domains, stated rather than pretended.
+          {/* Where this website actually lives.
+              Everything on the owner's own screen, behind their own session:
+              which host, which repository, whether it is private, what GitHub
+              says about the Pages build. The repository link is here because
+              it is the owner's repository — it never reaches a client, and
+              the published website contains no reference to any of it. */}
+          {deployment.platform === "github" && deployment.repo_name && (
+            <dl
+              className="mt-3 space-y-1 border-t border-line pt-3 text-sm"
+              data-hosting-info
+            >
+              <div className="flex gap-2">
+                <dt className="text-muted">Hosting</dt>
+                <dd className="flex-1 text-right font-medium">GitHub Pages</dd>
+              </div>
+              <div className="flex gap-2">
+                <dt className="text-muted">Repository</dt>
+                <dd className="flex-1 break-all text-right font-medium" data-repo-name>
+                  {deployment.repo_private ? "private" : "public"}/{deployment.repo_name}
+                </dd>
+              </div>
+              {deployment.pages_status && (
+                <div className="flex gap-2">
+                  <dt className="text-muted">GitHub Pages build</dt>
+                  <dd className="flex-1 text-right font-medium" data-pages-status>
+                    {deployment.pages_status}
+                  </dd>
+                </div>
+              )}
+              {deployment.repo_url && (
+                <div className="flex gap-2">
+                  <dt className="text-muted">On GitHub</dt>
+                  <dd className="flex-1 text-right font-medium">
+                    <a
+                      className="text-brand underline"
+                      href={deployment.repo_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      data-repo-link
+                    >
+                      Open repository
+                    </a>
+                  </dd>
+                </div>
+              )}
+            </dl>
+          )}
+
+          {/* Custom domains on built-in hosting, stated rather than pretended.
               Nothing here configures DNS, buys a name or installs a
               certificate, so there is no field that looks as though it does.
               What the creator gets is the one fact they need to act on: the
               address this server actually serves, and who has to point a
-              domain at it. */}
-          {platform === "builtin" && (
+              domain at it. A GitHub Pages site gets the real flow instead,
+              below, because there the application genuinely can configure the
+              domain on the host — it still cannot touch anybody's DNS. */}
+          {deployment.platform === "builtin" && (
             <details className="mt-3 rounded-xl border border-line p-3" data-custom-domain>
               <summary className="cursor-pointer text-sm font-semibold">
                 Using the client&apos;s own domain name
@@ -330,12 +418,30 @@ export function DeployPanel({
         </Card>
       ) : null}
 
+      {/* The real custom-domain flow: GitHub Pages only, because it is the
+          only provider here whose host this application can actually
+          configure. */}
+      {deployment?.status === "live" && deployment.platform === "github" && (
+        <CustomDomain
+          info={deployment}
+          busy={busy}
+          onConnect={(domain) => domainAction({ action: "connect-domain", domain })}
+          onCheck={async () => {
+            await domainAction({ action: "check-domain" });
+          }}
+          onDisconnect={async () => {
+            await domainAction({ action: "disconnect-domain" });
+          }}
+        />
+      )}
+
       {deployment?.status === "unpublished" && (
         <Card className="my-4">
           <p className="font-bold">This website has been taken down</p>
           <p className="mt-1.5 text-sm text-muted">
-            The address is still reserved for this project, so publishing again
-            puts it back at the same link.
+            {deployment.platform === "github"
+              ? "GitHub Pages has been switched off. The repository, its history and every file in it are untouched, so publishing again puts the website back at the same address."
+              : "The address is still reserved for this project, so publishing again puts it back at the same link."}
           </p>
         </Card>
       )}
@@ -383,23 +489,69 @@ export function DeployPanel({
       )}
 
       <Card className="my-4">
-        <Field label="Platform">
+        <Field label="Where to publish">
           {({ id }) => (
             <Select
               id={id}
               value={platform}
               onChange={(e) => setPlatform(e.target.value as DeployPlatform)}
+              data-platform-select
             >
-              <option value="builtin">Built-in hosting</option>
-              <option value="vercel" disabled={!available.vercel}>
-                Vercel{available.vercel ? "" : " (not connected)"}
+              <option value="github" disabled={!platforms.github}>
+                GitHub Pages{platforms.github ? "" : " (not connected)"}
               </option>
-              <option value="netlify" disabled={!available.netlify}>
-                Netlify{available.netlify ? "" : " (not connected)"}
+              <option value="builtin">Built-in hosting</option>
+              <option value="vercel" disabled={!platforms.vercel}>
+                Vercel{platforms.vercel ? "" : " (not connected)"}
+              </option>
+              <option value="netlify" disabled={!platforms.netlify}>
+                Netlify{platforms.netlify ? "" : " (not connected)"}
               </option>
             </Select>
           )}
         </Field>
+
+        {/* GitHub, when it is the chosen provider and not yet connected.
+            The two reasons it can be unavailable are different problems with
+            different owners, so they get different sentences: nobody has
+            configured the application, or nobody has connected an account. */}
+        {platform === "github" && !platforms.github && (
+          <div className="mt-3 rounded-xl border border-line p-3" data-github-connect>
+            {connection?.configured === false ? (
+              <>
+                <p className="text-sm font-semibold">GitHub is not set up on this server</p>
+                <p className="mt-1 text-xs text-muted">
+                  Whoever runs this application needs to create a GitHub OAuth
+                  app and set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET. Until
+                  then, built-in hosting publishes straight away with no setup.
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="text-sm font-semibold">Connect GitHub to publish there</p>
+                <p className="mt-1 text-xs text-muted">
+                  The website goes into a private repository on your GitHub
+                  account and is served publicly by GitHub Pages. The
+                  repository stays private; only the finished website is
+                  public.
+                </p>
+                <a
+                  href={`/api/github/connect?returnTo=${encodeURIComponent(`/projects/${projectId}/deploy`)}`}
+                  className="mt-3 inline-flex min-h-[var(--spacing-touch-lg)] items-center justify-center gap-2 rounded-xl bg-brand px-6 font-semibold text-on-brand active:scale-[0.98]"
+                >
+                  Connect GitHub
+                </a>
+              </>
+            )}
+          </div>
+        )}
+
+        {platform === "github" && platforms.github && connection?.login && (
+          <p className="mt-2 text-xs text-muted" data-github-account>
+            Publishing as <span className="font-semibold">{connection.login}</span>
+            {connection.via === "operator" ? " (configured on this server)" : ""}.
+          </p>
+        )}
 
         <Field
           label="Project name"
@@ -432,7 +584,7 @@ export function DeployPanel({
             print the link and it works immediately.
           </p>
         )}
-        {platform !== "builtin" && !available[platform] && (
+        {platform !== "builtin" && !platforms[platform] && (
           <p className="mt-3 text-xs text-warning">
             This platform needs an API token configured on the server. Built-in
             hosting works right now with no setup.

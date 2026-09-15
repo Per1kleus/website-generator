@@ -58,10 +58,38 @@ starts the download in the background, so a phone user is never waiting on it.
 | `WG_DATA_DIR` | Where the SQLite database, uploads and published sites live. Defaults to `./data`. |
 | `VERCEL_TOKEN` | Enables the Vercel deploy target. |
 | `NETLIFY_AUTH_TOKEN` | Enables the Netlify deploy target. |
+| `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | Enables publishing to GitHub Pages. Each creator connects their own GitHub account; callback URL `<origin>/api/github/callback`, scope `repo`. |
+| `WG_GITHUB_TOKEN` | Alternative for a single-operator install: one GitHub account for everybody on this install. Namespaced on purpose — a bare `GITHUB_TOKEN` is set by CI and by the `gh` CLI for unrelated reasons and is deliberately ignored. Do **not** set this on a shared deployment. |
+| `WG_DNS_SERVERS` | Which resolvers to use when checking a client's custom domain. Defaults to the system resolvers. |
 
 Built-in hosting needs no configuration: deploying publishes the site to
 `/s/<slug>` immediately, which is what makes "deploy from a phone" real rather
 than aspirational.
+
+### Publishing to GitHub Pages
+
+The production path is:
+
+```
+generated website -> private GitHub repository -> GitHub Pages -> public site
+                                                        -> optional client domain
+```
+
+The repository is private and stays private — it holds the client's
+photographs, prices and draft copy — while GitHub Pages serves the built files
+publicly. The published website is static and has no runtime dependency on
+this application: it keeps working when the generator is closed.
+
+Republishing pushes one commit to the same repository, so a link already given
+to a client never moves, and unpublishing switches Pages off without deleting
+the repository or anything in it.
+
+A client's own domain is connected from the same screen. The application
+configures GitHub Pages and watches DNS and HTTPS, but it does not control
+anybody's DNS: it shows the exact records to create and reports what is
+actually true — `DNS configuration required`, `Waiting for DNS`, `DNS
+detected`, `HTTPS pending`, `Active` — from real lookups rather than from what
+was typed.
 
 ## How it is put together
 
@@ -94,12 +122,18 @@ src/
     gemini.ts         the hosted model: one place for the model name and client
     ollama.ts         local model: detection, background install, JSON client
     ai-edit.ts        AI editing, locale-scoped, with structural guarantees
-    deploy.ts         built-in publishing, plus Vercel / Netlify
+    deploy.ts         the deployment engine: queue, staging, atomic publish
+    deploy-model.ts   what a deployment is: row, slug, fingerprint
+    deploy-view.ts    what a browser may know, and the custom-domain lifecycle
+    providers/        one file per host: builtin, github, vercel, netlify
+    github/           OAuth, API client and DNS/HTTPS checks for GitHub Pages
     svg.ts            SVG logo sanitiser
   components/         mobile-first UI
   app/                routes
 scripts/
   mobile-qa.mjs       the full-workflow mobile test harness
+  github-qa.mjs       GitHub Pages publishing, against a mock GitHub and a
+                      real DNS server
 ```
 
 ### The Site document

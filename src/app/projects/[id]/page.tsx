@@ -188,7 +188,13 @@ export default async function ProjectPage({
             deployment?.status === "live"
               ? changesPending
                 ? "Changes pending"
-                : "Live"
+                : deployment.custom_domain && deployment.domain_status === "active"
+                  ? `Live on ${deployment.custom_domain}`
+                  : // Which host, because "Live" alone does not say whether
+                    // the client's website survives this application closing.
+                    deployment.platform === "github"
+                    ? "Live on GitHub Pages"
+                    : "Live"
               : deployment?.status === "unpublished"
                 ? "Taken down"
                 : "Not published",

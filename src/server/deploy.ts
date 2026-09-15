@@ -1,96 +1,50 @@
 import "server-only";
-import { createHash, randomUUID } from "node:crypto";
-import { copyFile, mkdir, rename, rm, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { copyFile, mkdir, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { db } from "./db";
 import type { Site } from "@/lib/site";
 import { buildBundle, resizedBytes } from "./bundle";
+import { providerFor } from "./providers";
+import {
+  PUBLISH_DIR, siteFingerprint, slugify, uniqueSlug,
+  type Deployment, type DeploymentRow, type DeployPlatform,
+} from "./deploy-model";
+
+/* The shared vocabulary lives one level down, so the providers can use it
+   without importing the engine that uses them. Re-exported here because this
+   is still the module everything else asks. */
+export {
+  PUBLISH_DIR, siteFingerprint, slugify, uniqueSlug,
+  type Deployment, type DeployPlatform,
+} from "./deploy-model";
 
 /**
  * Deployment from a phone (requirement 13).
+ *
+ * This file is the engine, and it is deliberately ignorant of where a website
+ * ends up. It owns the deployment row, the queue, the log, the site
+ * fingerprint, the version that went live and the guarantee that a failure
+ * never leaves a half-written website in front of the public. Where the files
+ * go is a provider's business — `server/providers/` — so adding GitHub Pages
+ * added a file there rather than a branch here.
  *
  * `builtin` is a real deployment: the rendered site and its images are written
  * to disk and served publicly at /s/<slug>, with no authentication. That is
  * what makes "deploy from a café, with only a phone" actually true rather than
  * a screen that pretends.
  *
+ * `github` publishes to a private GitHub repository and serves it through
+ * GitHub Pages, which is the production path — the website keeps working when
+ * this application is closed.
+ *
  * Vercel and Netlify are offered when the operator has configured an API
  * token. Without one we say so plainly instead of faking a green tick.
  */
 
-export const PUBLISH_DIR = path.join(
-  process.env.WG_DATA_DIR ?? path.join(process.cwd(), "data"),
-  "published",
-);
-
-export type DeployPlatform = "builtin" | "vercel" | "netlify";
-
-export type Deployment = {
-  id: string;
-  project_id: string;
-  platform: DeployPlatform;
-  slug: string;
-  status: "queued" | "preparing" | "building" | "deploying" | "live" | "failed" | "unpublished";
-  url: string;
-  log: string[];
-  error: string | null;
-  created_at: number;
-  updated_at: number;
-  /** When it actually went live. 0 while it never did. */
-  published_at: number;
-  /** Fingerprint of the document that went live, for "changes since". */
-  site_hash: string;
-  /** When the creator took it down. 0 while it is up. */
-  unpublished_at: number;
-};
-
-/**
- * A fingerprint of exactly what was published.
- *
- * "Has this changed since it went live?" is answered by comparing documents,
- * not timestamps: `updated_at` moves when a project is renamed, when a version
- * is recorded, when anything at all is touched, and telling a creator their
- * live site is stale because they opened the editor would train them to
- * ignore the notice.
- */
-export function siteFingerprint(site: Site): string {
-  return createHash("sha256").update(JSON.stringify(site)).digest("hex").slice(0, 32);
-}
-
-type DeploymentRow = Omit<Deployment, "log"> & { log: string };
-
-export function platformAvailable(platform: DeployPlatform): boolean {
-  if (platform === "builtin") return true;
-  if (platform === "vercel") return Boolean(process.env.VERCEL_TOKEN);
-  if (platform === "netlify") return Boolean(process.env.NETLIFY_AUTH_TOKEN);
-  return false;
-}
-
-export function slugify(input: string): string {
-  return (
-    input
-      .toLowerCase()
-      .normalize("NFKD")
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "")
-      .slice(0, 48) || "site"
-  );
-}
-
-/** Appends `-2`, `-3`… until the slug is free. Slugs are globally unique. */
-export function uniqueSlug(base: string, forProjectId: string): string {
-  const root = slugify(base);
-  let candidate = root;
-  let n = 1;
-  for (;;) {
-    const taken = db
-      .prepare("SELECT project_id FROM deployments WHERE slug = ?")
-      .get(candidate) as { project_id: string } | undefined;
-    if (!taken || taken.project_id === forProjectId) return candidate;
-    n += 1;
-    candidate = `${root}-${n}`;
-  }
+export function platformAvailable(platform: DeployPlatform, userId = ""): boolean {
+  return providerFor(platform).available(userId);
 }
 
 function rowToDeployment(row: DeploymentRow): Deployment {
@@ -118,11 +72,21 @@ function update(id: string, patch: Partial<Deployment>) {
   db.prepare(
     `UPDATE deployments
         SET status = ?, url = ?, log = ?, error = ?, updated_at = ?,
-            published_at = ?, site_hash = ?, unpublished_at = ?
+            published_at = ?, site_hash = ?, unpublished_at = ?,
+            repo_owner = ?, repo_name = ?, repo_private = ?, repo_url = ?,
+            commit_sha = ?, pages_status = ?, pages_url = ?,
+            custom_domain = ?, domain_status = ?, domain_error = ?,
+            domain_checked_at = ?, version_id = ?
       WHERE id = ?`,
   ).run(
     merged.status, merged.url, JSON.stringify(merged.log), merged.error, Date.now(),
     merged.published_at ?? 0, merged.site_hash ?? "", merged.unpublished_at ?? 0,
+    merged.repo_owner ?? "", merged.repo_name ?? "", merged.repo_private ?? 1,
+    merged.repo_url ?? "", merged.commit_sha ?? "",
+    merged.pages_status ?? "", merged.pages_url ?? "",
+    merged.custom_domain ?? "", merged.domain_status ?? "none",
+    merged.domain_error ?? "", merged.domain_checked_at ?? 0,
+    merged.version_id ?? "",
     id,
   );
 }
@@ -139,6 +103,8 @@ export function startDeployment(
   platform: DeployPlatform,
   requestedSlug: string,
   origin: string,
+  userId: string,
+  versionId = "",
 ): Deployment {
   const slug = uniqueSlug(requestedSlug || site.meta.businessName, projectId);
   const now = Date.now();
@@ -151,9 +117,9 @@ export function startDeployment(
      or, worse, quietly produce a duplicate site at a different address while
      the creator believes they updated the one they gave their client.
 
-     So an existing deployment for this project at this address is reused: the
-     same row, reset to run again, keeping its history of when it first went
-     live. */
+     The same reasoning is what stops a second GitHub repository being created
+     on every publish: the row carries the repository it made last time, so
+     reusing the row is what makes the repository stable. */
     const existing = db
       .prepare("SELECT id FROM deployments WHERE project_id = ? AND slug = ?")
       .get(projectId, slug) as { id: string } | undefined;
@@ -172,8 +138,13 @@ export function startDeployment(
     ).run(id, projectId, platform, slug, now, now);
   }
 
+  // Which saved version is going live. The generator stays the source of
+  // truth for history; this is only a pointer into it, so a rollback that
+  // republishes an older version is recorded as exactly that.
+  if (versionId) update(id, { version_id: versionId });
+
   // Same pattern as generation: the response returns now, the work continues.
-  void runDeployment(id, site, platform, slug, origin);
+  void runDeployment(id, site, platform, slug, origin, projectId, userId);
 
   return getDeployment(id)!;
 }
@@ -184,16 +155,28 @@ async function runDeployment(
   platform: DeployPlatform,
   slug: string,
   origin: string,
+  projectId: string,
+  userId: string,
 ) {
-  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
-  try {
-    log(id, "Preparing files", "preparing");
-    await pause(300);
+  const provider = providerFor(platform);
+  const staging = path.join(PUBLISH_DIR, `.staging-${id}`);
 
-    // The public base URL is known here, so every page gets a real canonical
-    // and real hreflang links rather than relative guesses.
-    const siteBase = `${origin.replace(/\/$/, "")}/s/${slug}`;
-    const bundle = buildBundle(site, siteBase);
+  try {
+    if (!provider.available(userId)) throw new Error(provider.unavailableReason());
+
+    log(id, "Preparing files", "preparing");
+
+    /* The public address, before anything is built.
+       Every canonical link, hreflang link and sitemap entry in the bundle
+       contains it, so it has to be known first — and it differs per provider:
+       /s/<slug> here, <login>.github.io/<repo> on GitHub, the client's own
+       domain once one is connected. */
+    const deployment = getDeployment(id);
+    const baseCtx = { projectId, userId, slug, origin, deployment };
+    const siteBase = (await provider.publicBaseUrl(baseCtx)).replace(/\/$/, "");
+
+    log(id, "Building the site", "building");
+    const bundle = [...buildBundle(site, siteBase), ...((await provider.extraFiles?.(baseCtx)) ?? [])];
 
     /* Built beside the live site, never on top of it.
        ------------------------------------------------------------------
@@ -202,15 +185,10 @@ async function runDeployment(
        unreadable photograph, the process being killed — used to leave the
        public URL serving a half-written site with no way back.
 
-       So the new version is assembled under a staging name, and only once it
-       is complete does it change places with the live one. Both renames are
-       within one directory, so each is a single atomic operation as far as
-       any reader is concerned: a visitor sees the old site or the new one,
-       never a mixture. */
-    log(id, "Building the site", "building");
-    const target = path.join(PUBLISH_DIR, slug);
-    const staging = path.join(PUBLISH_DIR, `.staging-${id}`);
-    const previous = path.join(PUBLISH_DIR, `.previous-${id}`);
+       So the new version is assembled under a staging name, and the provider
+       swaps it in only once it is complete. The built-in provider renames a
+       directory; the GitHub provider moves a branch ref. Both are one step as
+       far as a visitor is concerned. */
     await rm(staging, { recursive: true, force: true });
     await mkdir(staging, { recursive: true });
 
@@ -229,141 +207,46 @@ async function runDeployment(
         }
       }
     } catch (err) {
-      // Nothing has been swapped in yet, so the live site is exactly as it
-      // was. Clear the half-built copy and report the real reason.
+      // Nothing has been handed to the provider yet, so the live site is
+      // exactly as it was. Clear the half-built copy and report the reason.
       await rm(staging, { recursive: true, force: true });
       throw err;
     }
     log(id, `${site.meta.locales.length} language${site.meta.locales.length === 1 ? "" : "s"}, ${images} image${images === 1 ? "" : "s"} bundled`);
 
-    const hadPrevious = existsSync(target);
-    try {
-      if (hadPrevious) await rename(target, previous);
-      await rename(staging, target);
-    } catch (err) {
-      // Put the old site back before giving up. The window in which neither
-      // exists is one rename wide and only reachable if the second rename
-      // fails, which is why the first thing the failure path does is undo it.
-      if (hadPrevious && existsSync(previous) && !existsSync(target)) {
-        await rename(previous, target).catch(() => {});
-      }
-      await rm(staging, { recursive: true, force: true });
-      throw err;
-    }
-    // The old version is only discarded once the new one is serving.
-    await rm(previous, { recursive: true, force: true });
-
     log(id, "Deploying", "deploying");
-    await pause(400);
-
-    if (platform === "builtin") {
-      log(id, "Published");
-      update(id, {
-        status: "live",
-        url: `${siteBase}/`,
-        published_at: Date.now(),
-        site_hash: siteFingerprint(site),
-        unpublished_at: 0,
-      });
-      return;
-    }
-
-    // Vercel / Netlify need an operator-provided token. Rather than pretend,
-    // fail loudly with the exact reason and leave the built files in place.
-    const tokenVar = platform === "vercel" ? "VERCEL_TOKEN" : "NETLIFY_AUTH_TOKEN";
-    if (!process.env[tokenVar]) {
-      throw new Error(
-        `${platform === "vercel" ? "Vercel" : "Netlify"} is not connected. ` +
-          `Ask whoever runs this app to set ${tokenVar}, or deploy with built-in hosting instead.`,
-      );
-    }
-
-    const defaultDoc = bundle.find(
-      (f): f is Extract<typeof f, { kind: "text" }> =>
-        f.kind === "text" && f.name === `${site.meta.defaultLocale}/index.html`,
-    );
-    const url = await deployToProvider(
-      platform,
+    const result = await provider.publish({
+      deploymentId: id,
+      projectId,
+      userId,
       slug,
-      defaultDoc?.content ?? "",
-      (line) => log(id, line),
-    );
-    log(id, "Published");
+      site,
+      stagingDir: staging,
+      bundle,
+      baseUrl: siteBase,
+      origin,
+      deployment: getDeployment(id)!,
+      log: (line) => log(id, line),
+    });
+
     update(id, {
       status: "live",
-      url,
+      url: result.url,
       published_at: Date.now(),
       site_hash: siteFingerprint(site),
       unpublished_at: 0,
+      error: null,
+      ...(result.meta ?? {}),
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Deployment failed";
     update(id, { status: "failed", error: message });
     log(id, `Failed: ${message}`);
+  } finally {
+    // A provider that consumed the staging directory has already moved it;
+    // one that copied out of it has not. Either way nothing is left behind.
+    await rm(staging, { recursive: true, force: true }).catch(() => {});
   }
-}
-
-/** Uploads a single-file site to Vercel or Netlify via their REST APIs. */
-async function deployToProvider(
-  platform: "vercel" | "netlify",
-  slug: string,
-  html: string,
-  onLog: (line: string) => void,
-): Promise<string> {
-  if (platform === "vercel") {
-    onLog("Uploading to Vercel");
-    const res = await fetch("https://api.vercel.com/v13/deployments", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${process.env.VERCEL_TOKEN}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        name: slug,
-        target: "production",
-        files: [{ file: "index.html", data: html }],
-        projectSettings: { framework: null },
-      }),
-    });
-    const data = (await res.json()) as { url?: string; error?: { message?: string } };
-    if (!res.ok) throw new Error(data.error?.message ?? "Vercel rejected the deployment.");
-    return `https://${data.url}`;
-  }
-
-  onLog("Uploading to Netlify");
-  const create = await fetch("https://api.netlify.com/api/v1/sites", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${process.env.NETLIFY_AUTH_TOKEN}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ name: slug }),
-  });
-  const site = (await create.json()) as { id?: string; ssl_url?: string; url?: string; message?: string };
-  if (!create.ok || !site.id) throw new Error(site.message ?? "Netlify rejected the site.");
-
-  const deploy = await fetch(`https://api.netlify.com/api/v1/sites/${site.id}/deploys`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${process.env.NETLIFY_AUTH_TOKEN}`,
-      "Content-Type": "application/zip",
-    },
-    // Buffer is not a valid BodyInit for the fetch types; a view is.
-    body: new Uint8Array(await zipSingleFile(html)),
-  });
-  if (!deploy.ok) throw new Error("Netlify rejected the upload.");
-
-  return site.ssl_url ?? site.url ?? `https://${slug}.netlify.app`;
-}
-
-async function zipSingleFile(html: string): Promise<Buffer> {
-  const archiver = (await import("archiver")).default;
-  const archive = archiver("zip", { zlib: { level: 9 } });
-  const chunks: Buffer[] = [];
-  archive.on("data", (c: Buffer) => chunks.push(c));
-  archive.append(html, { name: "index.html" });
-  await archive.finalize();
-  return Buffer.concat(chunks);
 }
 
 /**
@@ -374,17 +257,31 @@ async function zipSingleFile(html: string): Promise<Buffer> {
  * history of what was published when stays readable. Re-publishing reuses the
  * same slug, so the URL a creator already gave out keeps working.
  */
-export async function unpublish(projectId: string): Promise<boolean> {
+export async function unpublish(projectId: string, userId = ""): Promise<boolean> {
   const deployment = getLatestDeployment(projectId);
   if (!deployment || deployment.status !== "live") return false;
 
-  if (deployment.platform === "builtin") {
-    await rm(path.join(PUBLISH_DIR, deployment.slug), { recursive: true, force: true });
+  /* Taking the website down is not permission to delete anything.
+     The built-in provider removes the files it served; GitHub switches Pages
+     off and leaves the repository, its history and every file in it exactly
+     where they are; a Vercel or Netlify site is theirs to remove from their
+     own dashboard. A failure to reach the provider must still mark the site
+     as down here, because a creator pressing "take it down" has to see it
+     take effect — the error is recorded alongside. */
+  let error: string | null = null;
+  try {
+    await providerFor(deployment.platform).unpublish(deployment, userId);
+  } catch (err) {
+    error = err instanceof Error ? err.message : "The host could not be reached.";
+    console.error("[deploy] unpublish reported:", error);
   }
-  // A Vercel or Netlify site is theirs to remove, from their dashboard: this
-  // application has no mandate to delete something on an account it merely
-  // holds a token for. The status says so rather than pretending.
-  update(deployment.id, { status: "unpublished", unpublished_at: Date.now(), error: null });
+
+  update(deployment.id, {
+    status: "unpublished",
+    unpublished_at: Date.now(),
+    error,
+    pages_status: "",
+  });
   return true;
 }
 
@@ -412,12 +309,27 @@ export function hasUnpublishedChanges(projectId: string, site: Site | null): boo
  *
  * Returns the live URL when something was republished, otherwise null.
  */
-export async function refreshDeployment(projectId: string, site: Site): Promise<string | null> {
+export async function refreshDeployment(
+  projectId: string,
+  site: Site,
+  userId = "",
+  origin = "",
+): Promise<string | null> {
   const deployment = getLatestDeployment(projectId);
-  // Only built-in hosting is ours to rewrite; a Vercel/Netlify site needs a
-  // fresh deploy through their API, which is the creator's explicit action.
-  if (!deployment || deployment.status !== "live" || deployment.platform !== "builtin") {
-    return null;
+  if (!deployment || deployment.status !== "live") return null;
+
+  /* A hosted provider cannot be rewritten in place, so it is republished.
+     Built-in hosting is files on this disk, which can simply be overwritten.
+     A GitHub Pages site is a commit in somebody's repository: the only way to
+     change it is to push another one, which is the ordinary publish path. It
+     runs in the background exactly as a manual publish does, so a menu sync
+     still returns immediately. */
+  if (deployment.platform !== "builtin") {
+    if (!userId) return null;
+    const started = startDeployment(
+      projectId, site, deployment.platform, deployment.slug, origin, userId,
+    );
+    return started.url || deployment.url;
   }
 
   try {

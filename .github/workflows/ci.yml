@@ -68,6 +68,8 @@ jobs:
         run: npm run test:setup
       - name: Desktop packaging suite
         run: npm run test:desktop
+      - name: GitHub Pages suite
+        run: npm run test:github
 
       # --- suites that drive a running application -----------------------
       #

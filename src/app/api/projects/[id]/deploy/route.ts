@@ -1,13 +1,27 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/server/auth";
-import { getProject } from "@/server/projects";
+import { getProject, listVersions } from "@/server/projects";
 import {
-  getLatestDeployment, hasUnpublishedChanges, platformAvailable, startDeployment,
-  unpublish, type DeployPlatform,
+  getLatestDeployment, hasUnpublishedChanges, startDeployment, unpublish,
+  type DeployPlatform,
 } from "@/server/deploy";
+import { availability, isPlatform, providerFor } from "@/server/providers";
 import { checkPublishable } from "@/server/publish-gate";
+import { connectionStatus as githubStatus } from "@/server/github/oauth";
+import { connectDomain, disconnectDomain, refreshDomain, publicView } from "@/server/deploy-view";
 
-const PLATFORMS: DeployPlatform[] = ["builtin", "vercel", "netlify"];
+/**
+ * Publishing, and everything about where a website is published.
+ *
+ * One route, because it is one screen: the publish gate, the deployment, the
+ * hosting provider, the repository and the custom domain are all facets of
+ * "is this website in front of the public, and where". Splitting them would
+ * mean the screen polling four endpoints to answer one question.
+ *
+ * Every response is filtered through `publicView`, which is the allowlist for
+ * what a browser may know about a deployment. No credential passes it, and no
+ * credential could: tokens are never on a deployment row in the first place.
+ */
 
 export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }) {
   const user = await getCurrentUser();
@@ -19,9 +33,11 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
   // The gate is computed here so the screen can show, before anyone presses
   // anything, whether publishing would be refused and why.
   return NextResponse.json({
-    deployment: getLatestDeployment(id),
+    deployment: publicView(getLatestDeployment(id)),
     gate: checkPublishable(id, project.site),
     hasChanges: hasUnpublishedChanges(id, project.site),
+    available: availability(user.id),
+    github: githubStatus(user.id),
   });
 }
 
@@ -30,31 +46,66 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   if (!user) return NextResponse.json({ error: "Not signed in." }, { status: 401 });
 
   const { id } = await ctx.params;
+  // Ownership is checked here, once, for every action below. A project that
+  // is not this user's is indistinguishable from one that does not exist.
   const project = getProject(id, user.id);
   if (!project?.site) {
     return NextResponse.json({ error: "Generate the website first." }, { status: 400 });
   }
 
-  const body = (await req.json()) as { platform?: string; slug?: string; action?: string };
+  const body = (await req.json().catch(() => ({}))) as {
+    platform?: string;
+    slug?: string;
+    action?: string;
+    domain?: string;
+  };
 
   if (body.action === "unpublish") {
-    const removed = await unpublish(id);
+    const removed = await unpublish(id, user.id);
     return NextResponse.json({
       ok: removed,
-      deployment: getLatestDeployment(id),
+      deployment: publicView(getLatestDeployment(id)),
       ...(removed ? {} : { error: "This website is not published." }),
     });
   }
 
-  const platform = (PLATFORMS.includes(body.platform as DeployPlatform)
-    ? body.platform
-    : "builtin") as DeployPlatform;
+  /* ---------------------------------------------------- custom domains */
 
-  if (!platformAvailable(platform)) {
+  if (body.action === "connect-domain") {
+    const result = await connectDomain(id, user.id, body.domain ?? "");
     return NextResponse.json(
-      { error: "That platform is not connected on this server." },
-      { status: 400 },
+      result.ok
+        ? { ok: true, deployment: publicView(getLatestDeployment(id)), records: result.records }
+        : { error: result.error },
+      { status: result.ok ? 200 : 400 },
     );
+  }
+
+  if (body.action === "disconnect-domain") {
+    const result = await disconnectDomain(id, user.id);
+    return NextResponse.json(
+      result.ok ? { ok: true, deployment: publicView(getLatestDeployment(id)) } : { error: result.error },
+      { status: result.ok ? 200 : 400 },
+    );
+  }
+
+  if (body.action === "check-domain") {
+    const result = await refreshDomain(id, user.id);
+    return NextResponse.json(
+      result.ok
+        ? { ok: true, deployment: publicView(getLatestDeployment(id)), dns: result.dns }
+        : { error: result.error },
+      { status: result.ok ? 200 : 400 },
+    );
+  }
+
+  /* ---------------------------------------------------------- publish */
+
+  const platform = (isPlatform(body.platform) ? body.platform : "builtin") as DeployPlatform;
+  const provider = providerFor(platform);
+
+  if (!provider.available(user.id)) {
+    return NextResponse.json({ error: provider.unavailableReason() }, { status: 400 });
   }
 
   /* Refuse to put something broken in front of the public.
@@ -76,8 +127,12 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     platform,
     body.slug ?? "",
     new URL(req.url).origin,
+    user.id,
+    // Which saved version is going public. The version history itself is
+    // untouched — this only records which of its entries is the live one.
+    listVersions(id)[0]?.id ?? "",
   );
-  return NextResponse.json({ ok: true, deployment });
+  return NextResponse.json({ ok: true, deployment: publicView(deployment) });
 }
 
 export const dynamic = "force-dynamic";

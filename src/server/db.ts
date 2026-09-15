@@ -78,6 +78,19 @@ function migrate(handle: Database.Database) {
       updated_at    INTEGER NOT NULL
     );
 
+    /* GitHub account connected by a creator, for publishing to GitHub Pages.
+       Exactly the same shape and the same rules as google_accounts: the token
+       is encrypted at rest by server/crypto.ts, is read only inside server
+       modules, and never appears in a response or in a generated website. */
+    CREATE TABLE IF NOT EXISTS github_accounts (
+      user_id       TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      login         TEXT NOT NULL DEFAULT '',
+      access_token  TEXT NOT NULL,
+      scope         TEXT NOT NULL DEFAULT '',
+      created_at    INTEGER NOT NULL,
+      updated_at    INTEGER NOT NULL
+    );
+
     /* Which spreadsheet/tab a Digital Menu project reads from, plus the
        result of the last synchronisation. One source per project. */
     CREATE TABLE IF NOT EXISTS menu_sources (
@@ -239,6 +252,32 @@ const COLUMNS: [table: string, column: string, ddl: string][] = [
   // Set when the creator takes the site down; the row is kept so the slug
   // stays reserved and the history stays readable.
   ["deployments", "unpublished_at", "INTEGER NOT NULL DEFAULT 0"],
+
+  /* Provider metadata.
+     ------------------------------------------------------------------
+     Named per field rather than kept as a JSON blob because the publishing
+     screen shows each of them and the domain flow reads two of them on every
+     poll. Every one defaults to empty, so a deployment made before GitHub
+     existed reads exactly as it did: a built-in site with no repository, no
+     Pages and no domain.
+
+     No credential is among them. The token lives in github_accounts,
+     encrypted, and is fetched per request. */
+  ["deployments", "repo_owner", "TEXT NOT NULL DEFAULT ''"],
+  ["deployments", "repo_name", "TEXT NOT NULL DEFAULT ''"],
+  ["deployments", "repo_private", "INTEGER NOT NULL DEFAULT 1"],
+  /* The repository's own page, for the owner. Never shown to a client. */
+  ["deployments", "repo_url", "TEXT NOT NULL DEFAULT ''"],
+  ["deployments", "commit_sha", "TEXT NOT NULL DEFAULT ''"],
+  ["deployments", "pages_status", "TEXT NOT NULL DEFAULT ''"],
+  ["deployments", "pages_url", "TEXT NOT NULL DEFAULT ''"],
+  ["deployments", "custom_domain", "TEXT NOT NULL DEFAULT ''"],
+  ["deployments", "domain_status", "TEXT NOT NULL DEFAULT 'none'"],
+  ["deployments", "domain_error", "TEXT NOT NULL DEFAULT ''"],
+  ["deployments", "domain_checked_at", "INTEGER NOT NULL DEFAULT 0"],
+  /* Which saved version went live. The generator stays the source of truth
+     for version history; this only records which of its versions is public. */
+  ["deployments", "version_id", "TEXT NOT NULL DEFAULT ''"],
 ];
 
 function addColumns(handle: Database.Database) {
