@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useMounted } from "./LocalTime";
 import { AppShell } from "./AppShell";
 import { AppBar, Banner, Button, Card, Field, Select, TextInput, useToast } from "./ui";
 import { IconCheck, IconCopy, IconExternal, IconRocket } from "./icons";
@@ -30,7 +31,17 @@ export type PublishGate = {
   status: string;
 };
 
-/** "Today, 14:32" — a time a person reads, not an ISO string. */
+/**
+ * "Today, 14:32" — a time a person reads, not an ISO string.
+ *
+ * Rendered only once mounted: the server and the browser can be in different
+ * time zones, and a time formatted in each would not agree.
+ */
+function PublishedTime({ ts }: { ts: number }) {
+  const mounted = useMounted();
+  return <>{mounted ? whenPublished(ts) : "…"}</>;
+}
+
 function whenPublished(ts: number): string {
   if (!ts) return "never";
   const date = new Date(ts);
@@ -202,11 +213,30 @@ export function DeployPanel({
         </section>
       )}
 
+      {/* Warnings are shown, not merely counted: "3 things could be better"
+          tells a creator nothing they can act on. None of them stand in the
+          way of publishing. */}
       {gate && gate.ok && gate.warnings.length > 0 && deployment?.status !== "live" && (
-        <Banner tone="warning">
-          {gate.warnings.length} thing{gate.warnings.length === 1 ? "" : "s"} could be
-          better, but none of them stop you publishing.
-        </Banner>
+        <section className="my-4" data-publish-warnings>
+          <Card className="border-warning/40">
+            <p className="font-bold text-warning">
+              {gate.warnings.length} thing{gate.warnings.length === 1 ? "" : "s"} could be
+              better, but none of them stop you publishing.
+            </p>
+            <ul className="mt-2 space-y-1">
+              {gate.warnings.slice(0, 5).map((w) => (
+                <li key={w.id} className="text-sm" data-publish-warning>
+                  <span className="text-warning">!</span> {w.issue}
+                </li>
+              ))}
+            </ul>
+            {gate.warnings.length > 5 && (
+              <p className="mt-2 text-xs text-muted">
+                {gate.warnings.length - 5} more on the readiness checklist.
+              </p>
+            )}
+          </Card>
+        </section>
       )}
 
       {deployment?.status === "live" ? (
@@ -235,7 +265,7 @@ export function DeployPanel({
             <div className="flex gap-2">
               <dt className="text-muted">Last published</dt>
               <dd className="flex-1 text-right font-medium" data-publish-when>
-                {whenPublished(deployment.published_at)}
+                <PublishedTime ts={deployment.published_at} />
               </dd>
             </div>
             <div className="flex gap-2">

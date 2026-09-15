@@ -118,6 +118,8 @@ const SHEETS = {
 };
 
 let issuedRefresh = 0;
+/** Everything consent has ever granted, as Google accumulates it. */
+const grantedScopes = new Set();
 let lastChallenge = null;
 let lastChallengeMethod = null;
 
@@ -139,6 +141,11 @@ const server = createServer((req, res) => {
     // token exchange can be verified the way Google verifies it.
     lastChallenge = url.searchParams.get("code_challenge");
     lastChallengeMethod = url.searchParams.get("code_challenge_method");
+    // Google grants what was asked for, and with include_granted_scopes it
+    // keeps what was granted before. Echoing the request rather than a fixed
+    // string is what lets incremental consent be tested at all.
+    const asked = (url.searchParams.get("scope") ?? "").split(" ").filter(Boolean);
+    for (const scope of asked) grantedScopes.add(scope);
     res.writeHead(302, { Location: `${redirect}?code=mock-code&state=${encodeURIComponent(state ?? "")}` });
     return res.end();
   }
@@ -172,7 +179,7 @@ const server = createServer((req, res) => {
         access_token: "mock-access",
         refresh_token: "mock-refresh",
         expires_in: 3600,
-        scope: "https://www.googleapis.com/auth/spreadsheets.readonly https://www.googleapis.com/auth/drive.readonly",
+        scope: [...grantedScopes].join(" "),
       });
     });
   }
@@ -230,6 +237,100 @@ const server = createServer((req, res) => {
       sheets: Object.entries(found.tabs).map(([title, rows], i) => ({
         properties: { sheetId: i, title, gridProperties: { rowCount: rows.length } },
       })),
+    });
+  }
+
+  /* --------------------------- Google Analytics ------------------------- */
+
+  // The properties this account owns, as the Admin API lists them.
+  if (url.pathname === "/v1beta/accountSummaries") {
+    return send(200, {
+      accountSummaries: [
+        {
+          displayName: "Mock Account",
+          propertySummaries: [
+            { property: "properties/111", displayName: "Ouzeri Mikro" },
+            // Deliberately has no web data stream, so "connect" must refuse it
+            // rather than store a property that can never report anything.
+            { property: "properties/222", displayName: "App Only Property" },
+          ],
+        },
+      ],
+    });
+  }
+
+  const streams = url.pathname.match(/^\/v1beta\/properties\/([^/]+)\/dataStreams$/);
+  if (streams) {
+    if (streams[1] === "222") return send(200, { dataStreams: [] });
+    return send(200, {
+      dataStreams: [{ webStreamData: { measurementId: "G-MOCK12345" } }],
+    });
+  }
+
+  const report = url.pathname.match(/^\/v1beta\/properties\/([^/]+):runReport$/);
+  if (report) {
+    let body = "";
+    req.on("data", (c) => (body += c));
+    return req.on("end", () => {
+      const asked = JSON.parse(body || "{}");
+      const dimension = asked.dimensions?.[0]?.name ?? "";
+      if (dimension === "pagePath") {
+        return send(200, {
+          rows: [
+            { dimensionValues: [{ value: "/" }], metricValues: [{ value: "812" }] },
+            { dimensionValues: [{ value: "/services" }], metricValues: [{ value: "301" }] },
+          ],
+        });
+      }
+      if (dimension === "deviceCategory") {
+        return send(200, {
+          rows: [
+            { dimensionValues: [{ value: "mobile" }], metricValues: [{ value: "1100" }] },
+            { dimensionValues: [{ value: "desktop" }], metricValues: [{ value: "437" }] },
+          ],
+        });
+      }
+      return send(200, {
+        rows: [{ metricValues: [{ value: "1284" }, { value: "1537" }, { value: "3120" }] }],
+      });
+    });
+  }
+
+  /* ------------------------- Google Search Console ----------------------- */
+
+  if (url.pathname === "/webmasters/v3/sites") {
+    return send(200, {
+      siteEntry: [
+        { siteUrl: "https://ouzeri.example/", permissionLevel: "siteOwner" },
+        // Google's own word for "you added it but have not proved you own it".
+        { siteUrl: "https://unverified.example/", permissionLevel: "siteUnverifiedUser" },
+      ],
+    });
+  }
+
+  const search = url.pathname.match(/^\/webmasters\/v3\/sites\/([^/]+)\/searchAnalytics\/query$/);
+  if (search) {
+    let body = "";
+    req.on("data", (c) => (body += c));
+    return req.on("end", () => {
+      const asked = JSON.parse(body || "{}");
+      const dimension = asked.dimensions?.[0];
+      if (dimension === "query") {
+        return send(200, {
+          rows: [
+            { keys: ["ouzeri athens"], clicks: 180, impressions: 2400, ctr: 0.075, position: 8.2 },
+            { keys: ["greek meze"], clicks: 96, impressions: 3100, ctr: 0.031, position: 14.6 },
+          ],
+        });
+      }
+      if (dimension === "page") {
+        return send(200, {
+          rows: [{ keys: ["https://ouzeri.example/"], clicks: 240, impressions: 4000, ctr: 0.06, position: 9.1 }],
+        });
+      }
+      return send(200, {
+        rows: [{ clicks: 428, impressions: 8421, ctr: 0.051, position: 12.4 }],
+      });
     });
   }
 

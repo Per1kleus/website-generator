@@ -1,6 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import { LocalTime } from "./LocalTime";
 import { useState } from "react";
 import { AppShell } from "./AppShell";
 import { AppBar, Banner, BottomSheet, Button, Card, Field, TextInput, useToast } from "./ui";
@@ -105,7 +106,7 @@ export function VersionList({
                     </p>
                     <p className="mt-0.5 text-xs text-muted">
                       {KIND_LABEL[v.kind] ?? "Saved"} ·{" "}
-                      {new Date(v.created_at).toLocaleString()}
+                      <LocalTime ts={v.created_at} />
                     </p>
                   </div>
                   {v.current && (

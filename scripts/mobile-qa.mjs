@@ -149,8 +149,15 @@ async function main() {
   const page = await desktop.newPage();
 
   const consoleErrors = [];
-  page.on("console", (m) => m.type() === "error" && consoleErrors.push(m.text()));
-  page.on("pageerror", (e) => consoleErrors.push(String(e)));
+  // The URL is recorded alongside the message: "Failed to load resource:
+  // net::ERR_CERT_AUTHORITY_INVALID" names no host on its own, so filtering
+  // third-party font failures by message text alone misses them.
+  page.on("console", (m) => {
+    if (m.type() !== "error") return;
+    const where = m.location()?.url ?? "";
+    consoleErrors.push(`${m.text()} [${where || page.url()}] on ${page.url()}`);
+  });
+  page.on("pageerror", (e) => consoleErrors.push(`${e} on ${page.url()}`));
 
   console.log(`\n=== Builder workflow at 1440x900 (${BASE}) ===\n`);
 
@@ -562,7 +569,21 @@ async function main() {
   await checkNoHorizontalOverflow(page, "deploy");
   await checkTargets(page, "deploy", POINTER_TARGET);
   await page.getByRole("button", { name: "Deploy" }).click();
-  await page.getByText("Your website is live").waitFor({ timeout: 60000 });
+  // Publishing is gated now, so a refusal has to be reported as a refusal
+  // with its reasons. Waiting sixty seconds for "live" and timing out says
+  // only that something went wrong, which is the least useful failure there
+  // is when the gate is exactly what is being exercised.
+  const blocked = page.locator("[data-publish-blocked]");
+  const liveText = page.getByText("Your website is live");
+  await Promise.race([
+    liveText.waitFor({ timeout: 60000 }).catch(() => {}),
+    blocked.waitFor({ timeout: 60000 }).catch(() => {}),
+  ]);
+  if (await blocked.isVisible().catch(() => false)) {
+    const reasons = await page.locator("[data-publish-blocker]").allInnerTexts();
+    record("the publish gate let a finished website through", false, reasons.join(" | "));
+  }
+  await liveText.waitFor({ timeout: 60000 });
   record("deployment reaches Live from a phone", true);
   await page.screenshot({ path: `${SHOTS}/19-deployed.png` });
 
@@ -782,6 +803,14 @@ async function main() {
       !/fonts\.googleapis\.com|fonts\.gstatic\.com|ERR_CONNECTION_RESET|ERR_NAME_NOT_RESOLVED/i.test(e),
   );
   record("no console errors during the workflow", realErrors.length === 0, realErrors.slice(0, 3).join(" | "));
+
+  // Called out separately because a hydration mismatch is easy to lose in a
+  // list of console noise and is never cosmetic: React throws away the
+  // server's markup for that subtree and re-renders it, and the usual cause
+  // is a timestamp formatted in the server's time zone and again in the
+  // visitor's.
+  const hydration = consoleErrors.filter((e) => /418|423|425|hydrat/i.test(e));
+  record("nothing fails to hydrate", hydration.length === 0, hydration.slice(0, 2).join(" | "));
 
   /* 17. Web fonts must never be load-bearing ------------------------------ */
   // The design catalogue recommends a Google font pairing. If it cannot load

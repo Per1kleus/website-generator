@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { LocalTime } from "./LocalTime";
 import { useSearchParams } from "next/navigation";
 import { AppShell } from "./AppShell";
 import { AppBar, Banner, BottomSheet, Button, Card, TextInput, useToast } from "./ui";
@@ -28,15 +29,7 @@ type Finding = {
 
 const REQUIRED = ["name", "price", "description", "chefs choice", "category", "imageurl"];
 
-function relativeTime(ts: number): string {
-  if (!ts) return "never";
-  const mins = Math.round((Date.now() - ts) / 60000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins} minute${mins === 1 ? "" : "s"} ago`;
-  const hours = Math.round(mins / 60);
-  if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
-  return new Date(ts).toLocaleString();
-}
+
 
 export function MenuDataManager({
   projectId,
@@ -244,7 +237,7 @@ export function MenuDataManager({
                 <div className="flex gap-2">
                   <dt className="text-muted">Last synced</dt>
                   <dd className="min-w-0 flex-1 font-medium">
-                    {relativeTime(source?.last_sync_at ?? 0)}
+                    <LocalTime ts={source?.last_sync_at ?? 0} mode="relative" />
                   </dd>
                 </div>
               </dl>
@@ -296,7 +289,7 @@ export function MenuDataManager({
             />
           </ul>
           <p className="mt-3 text-xs text-muted">
-            {new Date(source.last_sync_at).toLocaleString()}
+            <LocalTime ts={source.last_sync_at} />
           </p>
         </Card>
       ) : null}
@@ -448,7 +441,7 @@ export function MenuDataManager({
                   <span className="min-w-0 flex-1">
                     <span className="block truncate font-semibold">{sheet.name}</span>
                     <span className="block text-xs text-muted">
-                      {sheet.modifiedTime ? new Date(sheet.modifiedTime).toLocaleDateString() : ""}
+                      {sheet.modifiedTime ? <LocalTime ts={Date.parse(sheet.modifiedTime)} options={{ day: "numeric", month: "short", year: "numeric" }} /> : ""}
                     </span>
                   </span>
                 </button>

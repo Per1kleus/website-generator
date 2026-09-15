@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { LocalTime } from "./LocalTime";
 import { AppShell } from "./AppShell";
 import { AppBar, Banner, Button, Card, useToast } from "./ui";
 import { IconCheck, IconCopy, IconExternal } from "./icons";
@@ -31,8 +32,8 @@ export type PreviewRow = {
   }[];
 };
 
-const when = (ts: number) =>
-  new Date(ts).toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" });
+const WHEN: Intl.DateTimeFormatOptions = { day: "numeric", month: "long", year: "numeric" };
+const when = (ts: number) => <LocalTime ts={ts} options={WHEN} />;
 
 export function ClientPreviewPanel({
   projectId,

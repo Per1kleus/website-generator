@@ -45,6 +45,69 @@ const BASE = process.argv[2] ?? "http://localhost:3100";
 const PRESET = "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
 const EXEC = process.env.PW_CHROME ?? (existsSync(PRESET) ? PRESET : undefined);
 
+/** The same site document with one translated string replaced. */
+function withString(site, locale, key, value) {
+  return {
+    ...site,
+    i18n: {
+      ...site.i18n,
+      [locale]: {
+        ...site.i18n[locale],
+        strings: { ...site.i18n[locale].strings, [key]: value },
+      },
+    },
+  };
+}
+
+/**
+ * A string key whose value provably reaches the rendered page.
+ *
+ * Picking `Object.keys(strings)[0]` picks whatever happens to be first, which
+ * may be an alt attribute or a label for a control this site does not show —
+ * and then a test that says "the change is live" is really testing nothing.
+ * Matching a value against the markup is not enough either: a phrase can be
+ * in the page because something else composed it, in which case editing the
+ * key changes nothing. The only honest answer is to edit a candidate, render,
+ * and keep the key only if the edit came out the other end. The site is put
+ * back as it was either way, so the caller starts from an unchanged project.
+ */
+async function renderableStringKey(api, projectId) {
+  const probe = "Qx-render-probe-8241";
+  const site = (await api(`/api/projects/${projectId}/site`)).json.site;
+  const locale = site.meta.defaultLocale;
+  const put = (next) =>
+    api(`/api/projects/${projectId}/site`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ site: next }),
+    });
+  const render = async () => (await api(`/api/projects/${projectId}/render`)).text ?? "";
+
+  const body = (await render()).replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, "");
+  const candidates = Object.entries(site.i18n[locale].strings)
+    .filter(([, value]) => typeof value === "string" && value.length > 12 && body.includes(value))
+    .map(([key]) => key);
+
+  for (const key of candidates) {
+    await put(withString(site, locale, key, probe));
+    const out = await render();
+    await put(site);
+    if (out.includes(probe)) return { site, locale, key };
+  }
+  return { site, locale, key: null };
+}
+
+/** Poll until a condition holds, or give up. Deployments are asynchronous. */
+async function waitFor(fn, { timeout = 30000, interval = 400 } = {}) {
+  const deadline = Date.now() + timeout;
+  for (;;) {
+    const value = await fn();
+    if (value) return value;
+    if (Date.now() > deadline) return null;
+    await new Promise((r) => setTimeout(r, interval));
+  }
+}
+
 /** A solid-colour PNG, for upload tests that need a real image file. */
 async function makePng(width, height, rgb) {
   return sharp({ create: { width, height, channels: 3, background: rgb } }).png().toBuffer();
@@ -1144,6 +1207,287 @@ console.log("\n=== Edit, save, preview ===\n");
     status?.status === jobsBefore?.status, `${jobsBefore?.status} → ${status?.status}`);
   record("the preview frame is still there, not a full page reload",
     await page.locator("iframe[data-preview-frame]").isVisible());
+}
+
+/* ======================================================================
+   Publishing: gated, atomic, and reversible
+   ====================================================================== */
+
+console.log("\n=== Publishing ===\n");
+
+let publishedUrl = "";
+{
+  const before = await api(`/api/projects/${projectId}/deploy`);
+  record("the publish screen knows whether it would be refused",
+    before.status === 200 && typeof before.json?.gate?.ok === "boolean",
+    `gate.ok=${before.json?.gate?.ok}`);
+  record("...and reports the readiness score behind that decision",
+    typeof before.json?.gate?.score === "number", `${before.json?.gate?.score}`);
+  record("an unpublished project has no changes to publish",
+    before.json?.hasChanges === false);
+
+  const first = await api(`/api/projects/${projectId}/deploy`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ platform: "builtin" }),
+  });
+  record("a healthy website publishes", first.status === 200, first.json?.error ?? "");
+
+  const live = await waitFor(async () => {
+    const st = await api(`/api/projects/${projectId}/deploy`);
+    const d = st.json?.deployment;
+    return d && (d.status === "live" || d.status === "failed") ? st.json : null;
+  }, { timeout: 60000 });
+  record("...and reaches a live state", live?.deployment?.status === "live",
+    live?.deployment?.status ?? "none");
+  publishedUrl = live?.deployment?.url ?? "";
+  record("...with a real URL", /^https?:\/\//.test(publishedUrl), publishedUrl);
+  record("...recorded as published at a real time",
+    (live?.deployment?.published_at ?? 0) > 0);
+  record("...and nothing since, because nothing has changed",
+    live?.hasChanges === false);
+
+  const path = publishedUrl.replace(/^https?:\/\/[^/]+/, "");
+  const root = await api(path);
+  record("the published website is actually served", root.status === 200);
+  // The root sends a visitor to their language; the page itself lives there.
+  const pageOf = async () => api(`${path}en/`);
+  const page = await pageOf();
+  record("...and is a real page, not a placeholder",
+    page.status === 200 && page.text.includes("<main") && page.text.includes("</html>"),
+    `status ${page.status}`);
+  record("no credential appears in the published HTML",
+    !/VERCEL_TOKEN|NETLIFY_AUTH|GEMINI_API_KEY|mock-access|client_secret/i.test(page.text));
+  record("nothing tracks the visitor, because no Analytics is configured",
+    !page.text.includes("googletagmanager"));
+
+  /* ---- editing makes the live site stale, and says so ---- */
+  const { site, locale, key: liveKey } = await renderableStringKey(api, projectId);
+  record("a visible piece of text can be found to change", Boolean(liveKey));
+  await api(`/api/projects/${projectId}/site`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ site: withString(site, locale, liveKey, "Published-change marker") }),
+  });
+
+  const stale = await api(`/api/projects/${projectId}/deploy`);
+  record("editing a published website is reported as changes not yet published",
+    stale.json?.hasChanges === true);
+
+  const stillOld = await pageOf();
+  record("...and the live site still shows the published version until told otherwise",
+    !stillOld.text.includes("Published-change marker"));
+
+  /* ---- publishing the changes reuses the same address ---- */
+  const again = await api(`/api/projects/${projectId}/deploy`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ platform: "builtin" }),
+  });
+  record("publishing changes is accepted", again.status === 200,
+    `status ${again.status} ${(again.text ?? "").slice(0, 200)}`);
+  const republished = await waitFor(async () => {
+    const st = await api(`/api/projects/${projectId}/deploy`);
+    return st.json?.deployment?.status === "live" && st.json?.hasChanges === false ? st.json : null;
+  }, { timeout: 60000 });
+  record("publishing changes updates the same website", Boolean(republished));
+  record("...at the same address, so a link already sent still works",
+    republished?.deployment?.url === publishedUrl,
+    `${republished?.deployment?.url} vs ${publishedUrl}`);
+
+  const fresh = await pageOf();
+  record("...and the change is now live", fresh.text.includes("Published-change marker"));
+  record("...with no leftover half-written page",
+    fresh.status === 200 && fresh.text.includes("</html>"));
+
+  /* ---- taking it down ---- */
+  const down = await api(`/api/projects/${projectId}/deploy`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "unpublish" }),
+  });
+  record("a website can be taken down", down.status === 200 && down.json?.ok === true);
+  const gone = await pageOf();
+  record("...and stops being served", gone.status === 404, `status ${gone.status}`);
+  record("...while the project remembers it was published",
+    (down.json?.deployment?.published_at ?? 0) > 0 &&
+      down.json?.deployment?.status === "unpublished");
+}
+
+console.log("\n=== Publishing refuses what is broken ===\n");
+
+{
+  // A project with nothing generated cannot be published, and says why.
+  const created = await api("/api/projects", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      businessName: "Never Built", description: "A project that was never generated.",
+      siteKind: "business", defaultLocale: "en", locales: ["en"],
+    }),
+  });
+  const emptyId = created.json?.project?.id;
+  const refused = await api(`/api/projects/${emptyId}/deploy`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ platform: "builtin" }),
+  });
+  record("a project with no website is refused", refused.status === 400);
+  record("...with a reason a person can act on",
+    /generate/i.test(JSON.stringify(refused.json ?? {})),
+    refused.json?.error ?? "");
+  record("...and nothing was published", (await api(`/api/projects/${emptyId}/deploy`)).json?.deployment === null);
+}
+
+{
+  // The other half of the rule: only what is actually broken stops a publish.
+  // A language nobody has translated yet is a serious fault on the checklist
+  // and costs the score, but the page renders, the links work and the text
+  // falls back — so it is reported next to the button rather than used to
+  // refuse. Anything else would be an arbitrary requirement.
+  //
+  // Adding a language with no model configured is exactly how a creator
+  // reaches this state: the locale is registered and every string falls back.
+  const added = await api(`/api/projects/${projectId}/languages`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "add", locale: "de" }),
+  });
+  record("a language can be added with no model configured", added.status === 200,
+    `status ${added.status}`);
+  record("...and it really is untranslated",
+    Object.keys(added.json?.site?.i18n?.de?.strings ?? {}).length === 0);
+
+  const gate = (await api(`/api/projects/${projectId}/deploy`)).json?.gate;
+  record("a language with no translations does not stop the publish",
+    gate?.ok === true, (gate?.blockers ?? []).map((b) => b.id).join(", "));
+  record("...but it is stated plainly, next to the button",
+    (gate?.warnings ?? []).some((w) => /not translated/i.test(w.issue ?? "")),
+    (gate?.warnings ?? []).map((w) => w.id).join(", "));
+  record("...and it still costs the readiness score",
+    typeof gate?.score === "number" && gate.score < 100, String(gate?.score));
+
+  await api(`/api/projects/${projectId}/languages`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "remove", locale: "de" }),
+  });
+}
+
+/* ======================================================================
+   Client preview: pinned to a version, and it stays pinned
+   ====================================================================== */
+
+console.log("\n=== Client preview stays with its version ===\n");
+
+{
+  const made = await api(`/api/projects/${projectId}/client-preview`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "create" }),
+  });
+  record("a client link is created", made.status === 200 && Boolean(made.json?.preview?.id));
+  const token = made.json.preview.id;
+  const pinnedVersion = made.json.previews[0].versionNumber;
+  record("the token is long and random, not an id",
+    token.length >= 40 && token !== projectId, `${token.length} chars`);
+
+  // The client approves this version.
+  const approve = await fetch(`${BASE}/api/p/${token}/respond`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ kind: "approved" }),
+  });
+  record("the client can approve without any account", approve.status === 200);
+
+  // The creator then changes the website.
+  const { site, locale, key } = await renderableStringKey(api, projectId);
+  const saved = await api(`/api/projects/${projectId}/site`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ site: withString(site, locale, key, "Changed after approval") }),
+  });
+  record("the creator's later edit is saved", saved.status === 200,
+    `status ${saved.status} ${(saved.text ?? "").slice(0, 120)}`);
+  record("...and produced a new version, because the old one had been shared",
+    ((await api(`/api/projects/${projectId}/versions`)).json.versions[0]?.number ?? 0) > pinnedVersion,
+    `latest v${(await api(`/api/projects/${projectId}/versions`)).json.versions[0]?.number}`);
+
+  const after = await api(`/api/projects/${projectId}/client-preview`);
+  const row = after.json.previews.find((p) => p.id === token);
+  record("the approval stays attached to the version it was given for",
+    row.versionNumber === pinnedVersion && row.responses.some((r) => r.kind === "approved"),
+    `approved v${row.versionNumber}`);
+
+  const stillOld = await fetch(`${BASE}/api/p/${token}/render`);
+  const html = await stillOld.text();
+  record("...and the link still shows exactly what the client approved",
+    !html.includes("Changed after approval"));
+
+  // A new link picks up the new work, and carries no approval.
+  const second = await api(`/api/projects/${projectId}/client-preview`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "create" }),
+  });
+  const newRow = second.json.previews[0];
+  record("a new link is a later version than the one already shared",
+    newRow.versionNumber > pinnedVersion, `v${pinnedVersion} → v${newRow.versionNumber}`);
+  record("...and starts unapproved", newRow.responses.length === 0);
+  const newHtml = await (await fetch(`${BASE}/api/p/${newRow.id}/render`)).text();
+  record("...and shows the changed website", newHtml.includes("Changed after approval"));
+
+  /* ---- feedback ---- */
+  const feedback = await fetch(`${BASE}/api/p/${newRow.id}/respond`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ kind: "changes", message: "Please change the hero image." }),
+  });
+  record("a client can ask for changes", feedback.status === 200);
+  const empty = await fetch(`${BASE}/api/p/${newRow.id}/respond`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ kind: "changes", message: "   " }),
+  });
+  record("...but not an empty request", empty.status === 400);
+
+  const withNote = await api(`/api/projects/${projectId}/client-preview`);
+  const note = withNote.json.previews[0].responses.find((r) => r.kind === "changes");
+  record("the creator sees the note", note?.message === "Please change the hero image.");
+  record("...as open until they resolve it", note?.resolved === 0);
+  await api(`/api/projects/${projectId}/client-preview`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "resolve", responseId: note.id }),
+  });
+  const resolved = await api(`/api/projects/${projectId}/client-preview`);
+  record("...and it can be marked resolved",
+    resolved.json.previews[0].responses.find((r) => r.id === note.id)?.resolved === 1);
+
+  /* ---- withdrawal and bad tokens ---- */
+  await api(`/api/projects/${projectId}/client-preview`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "revoke", previewId: token }),
+  });
+  record("a withdrawn link stops working",
+    (await fetch(`${BASE}/api/p/${token}/render`)).status === 404);
+  record("...and so does approving through it",
+    (await fetch(`${BASE}/api/p/${token}/respond`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ kind: "approved" }),
+    })).status === 404);
+
+  const guess = "z".repeat(43);
+  record("an invented token reveals nothing",
+    (await fetch(`${BASE}/api/p/${guess}/render`)).status === 404 &&
+      (await fetch(`${BASE}/p/${guess}`)).status === 404);
+
+  /* ---- a token is not a key to other projects ---- */
+  const otherAsset = await fetch(`${BASE}/api/p/${newRow.id}/asset/not-this-projects-asset`);
+  record("a valid token cannot fetch an asset it does not own",
+    otherAsset.status === 404, `status ${otherAsset.status}`);
 }
 
 await browser.close();

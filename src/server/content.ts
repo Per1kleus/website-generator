@@ -423,6 +423,22 @@ export function assembleSite(args: {
     if (section.type === "cta" && section.ctaHref === "#contact") section.ctaHref = resolved;
   }
 
+  // Same problem, one step later: the hero's second button is pointed at the
+  // menu section, and a menu with no categories in it is created switched
+  // off. That leaves a button that scrolls to nothing — and, because the
+  // checklist rightly calls a dangling anchor a broken page, it would stop
+  // the website being published over a section the generator itself hid. An
+  // empty href renders no button at all, which is the honest outcome.
+  const live = new Set(sections.filter((s) => s.visible).map((s) => s.id));
+  const keep = (href: string) => (href.startsWith("#") && !live.has(href.slice(1)) && href !== "#main" ? "" : href);
+  for (const section of sections) {
+    if (section.type === "hero") {
+      section.ctaHref = keep(section.ctaHref);
+      section.secondaryHref = keep(section.secondaryHref);
+    }
+    if (section.type === "cta") section.ctaHref = keep(section.ctaHref);
+  }
+
   return {
     version: 2,
     meta: {

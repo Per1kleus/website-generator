@@ -361,7 +361,20 @@ export function recordEdit(projectId: string, label: string, site: Site): string
     // Nothing actually changed — a save that rewrote the same document.
     if (previous && JSON.stringify(previous) === serialised) return null;
 
-    if (latest.kind === "manual" && Date.now() - latest.created_at < EDIT_COALESCE_MS) {
+    // A version somebody has been sent a link to is frozen.
+    //
+    // Folding edits into the newest version is what keeps history readable,
+    // but it rewrites that version's document in place — and if a client is
+    // holding a link to it, the page under them would quietly change into
+    // something they never saw. An approval given for it would then be an
+    // approval of different work, which is the one thing client preview must
+    // never allow. So a shared version ends the run of edits: the next edit
+    // starts a fresh version, and the shared one stays exactly as it was sent.
+    const shared = db
+      .prepare("SELECT 1 FROM client_previews WHERE version_id = ? LIMIT 1")
+      .get(latest.id);
+
+    if (!shared && latest.kind === "manual" && Date.now() - latest.created_at < EDIT_COALESCE_MS) {
       db.prepare("UPDATE versions SET site = ?, label = ?, created_at = ? WHERE id = ?").run(
         serialised,
         label,

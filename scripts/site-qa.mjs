@@ -32,6 +32,7 @@ import sharp from "sharp";
 const { auditSite, contentWidth, headingPx, longestRunEm, textEm, VIEWPORTS, formatReport } =
   await import("../src/lib/visual-qa.ts");
 const { correctSite, isCorrectable, MAX_PASSES } = await import("../src/lib/qa-fix.ts");
+const { assessReadiness } = await import("../src/lib/checklist.ts");
 const {
   buildTitle, buildDescription, buildKeywords, buildAltText,
   buildStructuredData, schemaType, applySeo, auditSeo,
@@ -348,6 +349,42 @@ console.log("\n=== Visual QA report structure ===\n");
   record("a broken page scores badly", report.score < 70, String(report.score));
 }
 
+{
+  // A button with a label and no destination used to render as href="#",
+  // which looks like a working control and does nothing when tapped. The
+  // readiness checklist counts that as a dead link, so it would also stop the
+  // website being published.
+  const lead = hero();
+  lead.secondaryHref = "";
+  const site = withCopy(makeSite([lead, about(), contact(), footer()]));
+  const html = renderSite(site, { locale: "en" });
+  record("a button with nowhere to go is not drawn at all",
+    !/href="#"/.test(html), (html.match(/href="#"[^>]*>[^<]*/) ?? [""])[0]);
+  record("...and the readiness report finds no dead link",
+    !assessReadiness({ site, locale: "en", html }).issues.some((i) => i.id === "dead-links-rendered"));
+  record("...while the button that does have a destination is still there",
+    html.includes('href="#contact"'));
+}
+
+{
+  // A digital menu is one page with a banner where a header would be, so the
+  // renderer draws no navigation for it at all. Reporting a missing phone
+  // menu here would be asking for something that cannot exist — and, since
+  // that finding is critical, it would stop a perfectly good menu going out.
+  const site = withCopy(makeSite([hero(), services(4), contact(), footer()], { kind: "menu" }));
+  const html = renderSite(site, { locale: "en" });
+  record("a digital menu renders no site navigation", !html.includes('class="nav-desktop"'));
+  const ids = auditSite({ site, locale: "en", html }).issues.map((i) => i.id);
+  record("...so it is not marked as missing a phone menu", !ids.includes("nav-mobile-missing"));
+
+  // The same page as an ordinary website must still be held to the rule.
+  const business = withCopy(makeSite([hero(), services(4), contact(), footer()]));
+  const stripped = renderSite(business, { locale: "en" }).replace(/class="nav-mobile"/g, 'class="nav-x"');
+  record("...while an ordinary website with no phone menu still is",
+    auditSite({ site: business, locale: "en", html: stripped }).issues
+      .some((i) => i.id === "nav-mobile-missing"));
+}
+
 console.log("\n=== Safe corrections are bounded and safe ===\n");
 
 {
@@ -367,6 +404,28 @@ console.log("\n=== Safe corrections are bounded and safe ===\n");
   record("every correction is described in plain language",
     outcome.applied.every((c) => c.what.length > 12 && !/[{}]/.test(c.what)),
     outcome.applied.map((c) => c.what).join(" | "));
+}
+
+{
+  // Switching a section off has to take the buttons that jump to it with it.
+  // Leaving one behind is a button that scrolls nowhere — and, because that
+  // is a critical finding, a correction the application made to itself would
+  // then stand in the way of publishing.
+  const empty = gallery([]);
+  const lead = hero();
+  lead.secondaryHref = `#${empty.id}`;
+  const site = withCopy(makeSite([lead, about(), empty, contact(), footer()]));
+  const outcome = correctSite({ site, locale: "en" });
+
+  record("the empty section was switched off",
+    outcome.site.sections.find((s) => s.id === empty.id).visible === false);
+  record("...and the button that jumped to it was cleared, not left dangling",
+    outcome.site.sections.find((s) => s.type === "hero").secondaryHref === "");
+  record("...so the readiness report no longer calls that anchor broken",
+    !assessReadiness({ site: outcome.site, locale: "en" }).issues
+      .some((i) => i.id === `dangling-anchor:#${empty.id}`));
+  record("...while a link to a section that is still there is untouched",
+    outcome.site.sections.find((s) => s.type === "hero").ctaHref === "#contact");
 }
 
 {

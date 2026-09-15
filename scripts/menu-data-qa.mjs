@@ -121,6 +121,9 @@ try {
     GOOGLE_USERINFO_URL: `${GOOGLE}/oauth2/v2/userinfo`,
     GOOGLE_SHEETS_BASE: GOOGLE,
     GOOGLE_DRIVE_BASE: GOOGLE,
+    GOOGLE_ANALYTICS_ADMIN_BASE: GOOGLE,
+    GOOGLE_ANALYTICS_DATA_BASE: GOOGLE,
+    GOOGLE_SEARCH_CONSOLE_BASE: GOOGLE,
     // Keep the design engine out of this test's way.
     WG_OLLAMA_AUTOPULL: "0",
     OLLAMA_HOST: "http://127.0.0.1:1",
@@ -360,6 +363,154 @@ try {
     `${imgOf(page)} vs ${imgOf(el.text)}`);
   record("chef's choice status is identical in both languages",
     (page.match(/class="chefs"/g) ?? []).length === (el.text.match(/class="chefs"/g) ?? []).length);
+
+  /* ------------------------------ Analytics and Search Console ---------- */
+  console.log("\n=== Analytics and Search Console ===\n");
+
+  {
+    // Both are optional, and both are off until a property is chosen.
+    let state = await api(`/api/projects/${projectId}/insights`);
+    record("a project starts with neither connected",
+      state.status === 200 && state.json?.analytics === null &&
+        state.json?.searchConsole === null);
+
+    // The mock consents to every scope it is asked for, so the extra
+    // permissions arrive the way they would after a real incremental consent.
+    const reconnect = await api(
+      `/api/google/connect?returnTo=${encodeURIComponent("/account/google")}&services=analytics`,
+    );
+    const consent2 = await fetch(reconnect.location, { redirect: "manual" });
+    const cb2 = new URL(consent2.headers.get("location"));
+    await api(`${cb2.pathname}${cb2.search}`);
+    record("the analytics scope is requested on top of the existing ones",
+      reconnect.location.includes("analytics.readonly") &&
+        reconnect.location.includes("spreadsheets.readonly"),
+      "incremental");
+    record("...and include_granted_scopes keeps the old ones",
+      reconnect.location.includes("include_granted_scopes=true"));
+
+    const props = await api(`/api/projects/${projectId}/insights?report=analyticsProperties`);
+    record("the account's Analytics properties are listed",
+      props.status === 200 && (props.json?.properties ?? []).length === 2,
+      JSON.stringify((props.json?.properties ?? []).map((p) => p.name)));
+
+    // A property with no web data stream cannot report on a website, so
+    // connecting it is refused rather than stored and left silently useless.
+    const noStream = await api(`/api/projects/${projectId}/insights`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ service: "analytics", propertyId: "properties/222", propertyName: "App Only" }),
+    });
+    record("a property with no website stream is refused with the reason",
+      noStream.status === 400 && /data stream/i.test(noStream.json?.error ?? ""),
+      noStream.json?.error ?? "");
+
+    const connected = await api(`/api/projects/${projectId}/insights`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ service: "analytics", propertyId: "properties/111", propertyName: "Ouzeri Mikro" }),
+    });
+    record("a real property connects", connected.status === 200);
+    record("...and the public measurement id came from Google, not from typing",
+      connected.json?.analytics?.measurement_id === "G-MOCK12345",
+      connected.json?.analytics?.measurement_id ?? "");
+    record("no token is ever in the response",
+      !/mock-access|refresh|client_secret/i.test(connected.text), connected.text.slice(0, 60));
+
+    const report = await api(`/api/projects/${projectId}/insights?report=analytics&range=28d`);
+    record("Analytics figures come back", report.status === 200);
+    record("...and are the numbers Google returned",
+      report.json?.report?.visitors === 1284 && report.json?.report?.sessions === 1537,
+      `${report.json?.report?.visitors} / ${report.json?.report?.sessions}`);
+    record("...with top pages and a device split",
+      (report.json?.report?.topPages ?? []).length === 2 &&
+        (report.json?.report?.devices ?? []).some((d) => d.device === "mobile"));
+    record("device shares are computed from those numbers, not invented",
+      (report.json?.report?.devices ?? []).reduce((n, d) => n + d.share, 0) === 100,
+      JSON.stringify(report.json?.report?.devices ?? []));
+
+    for (const range of ["7d", "28d", "3m", "6m"]) {
+      const r = await api(`/api/projects/${projectId}/insights?report=analytics&range=${range}`);
+      record(`the ${range} range is served`, r.status === 200 && Boolean(r.json?.report?.range?.startDate));
+    }
+    const bogus = await api(`/api/projects/${projectId}/insights?report=analytics&range=99y`);
+    record("an unsupported range is explained rather than faked",
+      bogus.status === 400 && /range/i.test(bogus.json?.error ?? ""), bogus.json?.error ?? "");
+
+    /* ---- the website itself ---- */
+    const published = await api(`/api/projects/${projectId}/export`);
+    record("the measurement id reaches the published website",
+      published.status === 200);
+
+    const rendered = await api(`/api/projects/${projectId}/render`);
+    record("...but the preview is not tracked",
+      !rendered.text.includes("googletagmanager"), "preview clean");
+
+    /* ---- Search Console ---- */
+    // Its own scope, granted the same incremental way — and Analytics must
+    // survive it, which is the whole point of include_granted_scopes.
+    const scConnect = await api(
+      `/api/google/connect?returnTo=${encodeURIComponent("/account/google")}&services=searchConsole`,
+    );
+    const scConsent = await fetch(scConnect.location, { redirect: "manual" });
+    const scCb = new URL(scConsent.headers.get("location"));
+    await api(`${scCb.pathname}${scCb.search}`);
+
+    const both = await api("/api/google/status");
+    record("granting Search Console keeps the Analytics permission",
+      both.json?.google?.analytics === true && both.json?.google?.searchConsole === true,
+      JSON.stringify(both.json?.google ?? {}));
+    record("...and the Sheets and Drive permissions the menu needs",
+      both.json?.google?.sheets === true && both.json?.google?.drive === true);
+
+    const sites = await api(`/api/projects/${projectId}/insights?report=searchConsoleSites`);
+    record("Search Console properties are listed", sites.status === 200,
+      JSON.stringify((sites.json?.sites ?? []).map((x) => x.url)));
+    record("an unverified property is reported as unverified, not as connected",
+      (sites.json?.sites ?? []).some((x) => x.verified === false),
+      JSON.stringify((sites.json?.sites ?? []).map((x) => [x.url, x.verified])));
+
+    const sc = await api(`/api/projects/${projectId}/insights`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        service: "searchConsole", propertyId: "https://ouzeri.example/", propertyName: "ouzeri.example",
+      }),
+    });
+    record("a verified property connects", sc.status === 200);
+
+    const scReport = await api(`/api/projects/${projectId}/insights?report=searchConsole&range=28d`);
+    record("search performance comes back",
+      scReport.status === 200 && scReport.json?.report?.clicks === 428 &&
+        scReport.json?.report?.impressions === 8421,
+      `${scReport.json?.report?.clicks} clicks`);
+    record("...with the queries and pages Google returned",
+      (scReport.json?.report?.queries ?? []).length === 2 &&
+        (scReport.json?.report?.pages ?? []).length === 1);
+    record("...and CTR and position exactly as given",
+      scReport.json?.report?.ctr === 0.051 && scReport.json?.report?.position === 12.4);
+    record("the reported window excludes the days Google has not finished counting",
+      new Date(scReport.json?.report?.range?.endDate).getTime() < Date.now() - 86_400_000);
+
+    /* ---- disconnecting ---- */
+    const off = await api(`/api/projects/${projectId}/insights`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "disconnect", service: "analytics" }),
+    });
+    record("Analytics disconnects", off.status === 200);
+    const afterOff = await api(`/api/projects/${projectId}/insights`);
+    record("...and the project no longer claims it", afterOff.json?.analytics === null);
+
+    const cleanSite = await api(`/api/projects/${projectId}/site`);
+    record("...and the tracking id is off the website document",
+      !cleanSite.json?.site?.meta?.analytics?.measurementId,
+      JSON.stringify(cleanSite.json?.site?.meta?.analytics ?? null));
+
+    const noReport = await api(`/api/projects/${projectId}/insights?report=analytics&range=28d`);
+    record("asking for figures with nothing connected says so",
+      noReport.status === 400 && /connected/i.test(noReport.json?.error ?? ""));
+  }
 
   console.log("\n=== Re-sync stability ===\n");
 

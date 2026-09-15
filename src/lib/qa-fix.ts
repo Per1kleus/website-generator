@@ -203,17 +203,44 @@ const singlePriorityImage: Fixer = (site) => {
   };
 };
 
+/**
+ * Buttons that jump to a section that is no longer on the page.
+ *
+ * Switching a section off has to take its inbound links with it. Leaving them
+ * behind produces a button that scrolls nowhere — which the checklist rightly
+ * calls a broken page, and which would then stop the website being published
+ * because of a correction the application made to itself. An empty href is
+ * not rendered as a button at all, so clearing it removes the button rather
+ * than leaving a dead one.
+ */
+function dropAnchorsTo(sections: Site["sections"], id: string): Site["sections"] {
+  const anchor = `#${id}`;
+  const clear = (href: string) => (href === anchor ? "" : href);
+  return sections.map((s) => {
+    if (s.type === "hero") {
+      return { ...s, ctaHref: clear(s.ctaHref), secondaryHref: clear(s.secondaryHref) };
+    }
+    if (s.type === "cta") return { ...s, ctaHref: clear(s.ctaHref) };
+    if (s.type === "contact") {
+      return { ...s, mapsUrl: clear(s.mapsUrl), bookingUrl: clear(s.bookingUrl) };
+    }
+    if (s.type === "footer") return { ...s, links: s.links.filter((l) => l.href !== anchor) };
+    return s;
+  });
+}
+
 /** An empty section is switched off, never filled with invented content. */
 const hideEmptySection: Fixer = (site, issue) => {
   const id = issue.location.match(/\(([^)]+)\)/)?.[1];
   if (!id) return null;
   const target = site.sections.find((s) => s.id === id);
   if (!target || !target.visible) return null;
+  const sections = dropAnchorsTo(
+    site.sections.map((s) => (s.id === id ? { ...s, visible: false } : s)),
+    id,
+  );
   return {
-    site: {
-      ...site,
-      sections: site.sections.map((s) => (s.id === id ? { ...s, visible: false } : s)),
-    },
+    site: { ...site, sections },
     what: `switched off the empty ${target.type} section until there is content for it`,
   };
 };

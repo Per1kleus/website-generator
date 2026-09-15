@@ -348,7 +348,13 @@ export function auditSite(input: QaInput): QaReport {
     const links = visible.filter(
       (s) => s.type !== "hero" && s.type !== "footer" && t(site, locale, key.section(s.id, "title")),
     ).length;
-    if (arch.nav !== "none" && links > 7) {
+    // A digital menu is one page with a banner instead of a header, so the
+    // renderer draws no navigation at all for it whatever the architecture
+    // says. Asking for a phone menu here would be asking for something that
+    // cannot exist — and, since a missing phone menu blocks publishing, it
+    // would stop a perfectly good menu going out.
+    const navigable = arch.nav !== "none" && site.meta.kind !== "menu";
+    if (navigable && links > 7) {
       add({
         id: "nav-crowded",
         category: "navigation",
@@ -362,7 +368,7 @@ export function auditSite(input: QaInput): QaReport {
     if (input.html) {
       const hasToggle = /class="nav-toggle"/.test(input.html);
       const hasMobileNav = /class="nav-mobile"/.test(input.html);
-      if (arch.nav !== "none" && links > 0 && (!hasToggle || !hasMobileNav)) {
+      if (navigable && links > 0 && (!hasToggle || !hasMobileNav)) {
         add({
           id: "nav-mobile-missing",
           category: "navigation",

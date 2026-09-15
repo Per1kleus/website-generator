@@ -140,14 +140,37 @@ export function startDeployment(
   requestedSlug: string,
   origin: string,
 ): Deployment {
-  const id = randomUUID();
   const slug = uniqueSlug(requestedSlug || site.meta.businessName, projectId);
   const now = Date.now();
 
-  db.prepare(
-    `INSERT INTO deployments (id, project_id, platform, slug, status, url, log, created_at, updated_at)
-     VALUES (?, ?, ?, ?, 'queued', '', '[]', ?, ?)`,
-  ).run(id, projectId, platform, slug, now, now);
+  /* Publishing again updates the website that is already there.
+     ------------------------------------------------------------------
+     The slug is the address, and the address is unique — so a second
+     deployment to the same one is not a second website, it is this website
+     changing. Inserting a new row would either collide with the unique index
+     or, worse, quietly produce a duplicate site at a different address while
+     the creator believes they updated the one they gave their client.
+
+     So an existing deployment for this project at this address is reused: the
+     same row, reset to run again, keeping its history of when it first went
+     live. */
+    const existing = db
+      .prepare("SELECT id FROM deployments WHERE project_id = ? AND slug = ?")
+      .get(projectId, slug) as { id: string } | undefined;
+
+  const id = existing?.id ?? randomUUID();
+  if (existing) {
+    db.prepare(
+      `UPDATE deployments
+          SET platform = ?, status = 'queued', log = '[]', error = NULL, updated_at = ?
+        WHERE id = ?`,
+    ).run(platform, now, id);
+  } else {
+    db.prepare(
+      `INSERT INTO deployments (id, project_id, platform, slug, status, url, log, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 'queued', '', '[]', ?, ?)`,
+    ).run(id, projectId, platform, slug, now, now);
+  }
 
   // Same pattern as generation: the response returns now, the work continues.
   void runDeployment(id, site, platform, slug, origin);

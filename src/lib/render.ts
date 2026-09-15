@@ -50,6 +50,19 @@ function safeHref(raw: string): string {
   return "#";
 }
 
+/**
+ * Whether a button has somewhere to go.
+ *
+ * A label with no destination used to render as an `href="#"` button, which
+ * looks like a working control and does nothing when tapped — the worst kind
+ * of broken, and one the readiness checklist counts as a dead link. A button
+ * with no destination is simply not drawn.
+ */
+function hasDestination(raw: string): boolean {
+  const v = String(raw ?? "").trim();
+  return Boolean(v) && v !== "#" && safeHref(v) !== "#";
+}
+
 export type RenderOptions = {
   /** Which language to render. Defaults to the site's default locale. */
   locale?: Locale;
@@ -766,8 +779,8 @@ ${str("eyebrow") ? `<p class="eyebrow">${esc(str("eyebrow"))}</p>` : ""}
 <h1 id="${id}-h">${esc(str("headline"))}</h1>
 <p class="muted lead">${esc(str("subheadline"))}</p>
 <div class="btns">
-${str("ctaLabel") ? `<a class="btn" href="${safeHref(s.ctaHref)}">${esc(str("ctaLabel"))}</a>` : ""}
-${str("secondaryLabel") ? `<a class="btn ghost" href="${safeHref(s.secondaryHref)}">${esc(str("secondaryLabel"))}</a>` : ""}
+${str("ctaLabel") && hasDestination(s.ctaHref) ? `<a class="btn" href="${safeHref(s.ctaHref)}">${esc(str("ctaLabel"))}</a>` : ""}
+${str("secondaryLabel") && hasDestination(s.secondaryHref) ? `<a class="btn ghost" href="${safeHref(s.secondaryHref)}">${esc(str("secondaryLabel"))}</a>` : ""}
 </div></div>
 ${media}
 </div></section>`;
@@ -960,7 +973,7 @@ ${bodyHtml}
       const inline = s.layout === "inline";
       return `<section class="${inline ? "cta-inline" : "cta-band"}" id="${id}" aria-labelledby="${id}-h"><div class="wrap">
 <h2 id="${id}-h">${esc(str("heading"))}</h2><p>${esc(str("body"))}</p>
-${str("ctaLabel") ? `<div class="btns"><a class="btn" href="${safeHref(s.ctaHref)}">${esc(str("ctaLabel"))}</a></div>` : ""}
+${str("ctaLabel") && hasDestination(s.ctaHref) ? `<div class="btns"><a class="btn" href="${safeHref(s.ctaHref)}">${esc(str("ctaLabel"))}</a></div>` : ""}
 </div></section>`;
     }
 
@@ -1045,7 +1058,7 @@ export function renderSite(site: Site, opts: RenderOptions = {}): string {
   const stickyLabel = t(site, locale, key.meta("stickyCtaLabel"));
   // A menu never gets a sticky bar: nothing may cover the prices.
   const isMenu = site.meta.kind === "menu" || a.nav === "none";
-  const hasSticky = sticky.enabled && stickyLabel && !isMenu;
+  const hasSticky = sticky.enabled && stickyLabel && hasDestination(sticky.href) && !isMenu;
 
   const title = seo?.title || site.meta.businessName;
   const description = seo?.description || "";

@@ -111,14 +111,28 @@ export function checkPublishable(projectId: string, site: Site | null): PublishG
     };
   }
 
-  const blockers = report.issues
-    .filter((i) => i.severity === "critical")
+  // A critical issue stops the publish, with one deliberate exception.
+  //
+  // The checklist grades a website for handing to a client, and by that
+  // standard a language whose text has not been translated is a serious
+  // fault: the switcher offers English and the visitor gets Greek. It is not,
+  // however, a broken website — every page renders, every link works, and the
+  // fallback is readable. Refusing to publish over it would be this
+  // application deciding for the creator that a site nobody can see is better
+  // than one that is a language short, which is exactly the kind of arbitrary
+  // requirement a publish gate must not impose. It is reported instead, in
+  // full, next to the publish button — and it still costs the score.
+  const advisory = (id: string) => id.startsWith("untranslated:");
+
+  const critical = report.issues.filter((i) => i.severity === "critical");
+  const blockers = critical
+    .filter((i) => !advisory(i.id))
     .map((i) => ({ id: i.id, issue: i.issue, correction: i.correction }));
 
   return {
     ok: blockers.length === 0,
     blockers,
-    warnings: report.issues.filter((i) => i.severity === "warning"),
+    warnings: [...critical.filter((i) => advisory(i.id)), ...report.issues.filter((i) => i.severity === "warning")],
     score: report.score,
     status: report.status,
   };
