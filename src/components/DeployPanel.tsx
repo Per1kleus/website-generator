@@ -279,6 +279,27 @@ export function DeployPanel({
             </div>
           </dl>
 
+          {/* Custom domains, stated rather than pretended.
+              Nothing here configures DNS, buys a name or installs a
+              certificate, so there is no field that looks as though it does.
+              What the creator gets is the one fact they need to act on: the
+              address this server actually serves, and who has to point a
+              domain at it. */}
+          {platform === "builtin" && (
+            <details className="mt-3 rounded-xl border border-line p-3" data-custom-domain>
+              <summary className="cursor-pointer text-sm font-semibold">
+                Using the client&apos;s own domain name
+              </summary>
+              <p className="mt-2 text-xs text-muted">
+                This application does not register domains or issue certificates.
+                To put the website on the client&apos;s own address, whoever manages
+                that domain points it at the server this application is running
+                on, and that server terminates HTTPS for it. Until that is done,
+                the address above is the live one and is the link to share.
+              </p>
+            </details>
+          )}
+
           <div className="mt-3 grid gap-2.5 sm:grid-cols-2">
             <Button
               size="lg"

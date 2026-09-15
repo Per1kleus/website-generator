@@ -1270,6 +1270,14 @@ let publishedUrl = "";
     body: JSON.stringify({ site: withString(site, locale, liveKey, "Published-change marker") }),
   });
 
+  // Custom domains are explained, never faked: no field claims to register a
+  // name or issue a certificate, because nothing here does either.
+  const screen = (await api(`/projects/${projectId}/deploy`)).text ?? "";
+  record("the publishing screen says how a client's own domain would work",
+    /data-custom-domain/.test(screen) && /does not register domains/i.test(screen));
+  record("...and offers no control that pretends to do it for them",
+    !/(buy|register|purchase)[^<]{0,20}domain[^<]{0,20}<\/button>/i.test(screen));
+
   const stale = await api(`/api/projects/${projectId}/deploy`);
   record("editing a published website is reported as changes not yet published",
     stale.json?.hasChanges === true);
