@@ -70,6 +70,8 @@ jobs:
         run: npm run test:desktop
       - name: GitHub Pages suite
         run: npm run test:github
+      - name: Backup and recovery suite
+        run: npm run test:backup
 
       # --- suites that drive a running application -----------------------
       #

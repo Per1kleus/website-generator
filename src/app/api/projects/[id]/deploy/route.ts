@@ -90,10 +90,20 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   }
 
   if (body.action === "check-domain") {
-    const result = await refreshDomain(id, user.id);
+    /* A person pressed the button, so this really looks. The window that
+       applies here only stops a double-click, not a considered retry. */
+    const result = await refreshDomain(id, user.id, { force: true });
     return NextResponse.json(
       result.ok
-        ? { ok: true, deployment: publicView(getLatestDeployment(id)), dns: result.dns }
+        ? {
+            ok: true,
+            deployment: publicView(getLatestDeployment(id)),
+            dns: result.dns,
+            // True when this answer is the last observation rather than a
+            // fresh one. DNS does not change in seconds, and saying so is
+            // better than pretending to have looked again.
+            throttled: Boolean(result.throttled),
+          }
         : { error: result.error },
       { status: result.ok ? 200 : 400 },
     );

@@ -1,5 +1,7 @@
 import "server-only";
-import { checkDomain, requiredRecords, type DnsRecord, type DomainState } from "@/lib/domain";
+import {
+  checkDomain, requiredRecords, type DnsRecord, type DomainState,
+} from "@/lib/domain";
 import { getLatestDeployment, type Deployment } from "./deploy";
 import { db } from "./db";
 import { GitHubError, getPages, enforceHttps, setPagesDomain } from "./github/api";
@@ -61,6 +63,10 @@ export type DeploymentView = {
   domain_checked_at: number;
   /** The records the creator has to create, when a domain is connected. */
   domain_records: DnsRecord[];
+  /** Whether the domain is an apex or a subdomain, which decides the records. */
+  domain_kind: "apex" | "subdomain" | "";
+  /** The Pages host a CNAME should point at, for the instructions. */
+  pages_host: string;
 };
 
 export function publicView(deployment: Deployment | null): DeploymentView | null {
@@ -96,9 +102,35 @@ export function publicView(deployment: Deployment | null): DeploymentView | null
     domain_checked_at: deployment.domain_checked_at,
     domain_records:
       deployment.custom_domain && host
-        ? requiredRecords(deployment.custom_domain, host)
+        ? mergeFoundFlags(deployment.id, requiredRecords(deployment.custom_domain, host))
         : [],
+    domain_kind: (() => {
+      const check = checkDomain(deployment.custom_domain);
+      return check.ok ? check.kind : "";
+    })(),
+    pages_host: host,
   };
+}
+
+/**
+ * The per-record "found" flags from the last check.
+ *
+ * Kept in memory rather than in a column: it is a fact about DNS thirty
+ * seconds ago, not about the deployment, and a stale flag surviving a restart
+ * would be worse than no flag. An absent entry simply means "not checked
+ * yet", which the screen shows as exactly that.
+ */
+const lastComparison = new Map<string, { at: number; records: DnsRecord[] }>();
+
+function mergeFoundFlags(deploymentId: string, records: DnsRecord[]): DnsRecord[] {
+  const remembered = lastComparison.get(deploymentId);
+  if (!remembered) return records;
+  return records.map((record) => {
+    const match = remembered.records.find(
+      (r) => r.type === record.type && r.value === record.value && r.name === record.name,
+    );
+    return match ? { ...record, found: match.found } : record;
+  });
 }
 
 /* ------------------------------------------------------ custom domains */
@@ -173,6 +205,31 @@ export async function connectDomain(
 
   const host = deployment.repo_owner ? pagesHost(deployment.repo_owner) : "";
   const records = requiredRecords(check.domain, host);
+
+  /* Changing from one domain to another.
+     The old name has to stop being GitHub's idea of this site's domain, or it
+     is left claimed: GitHub refuses to serve the same domain from two Pages
+     sites, so a stale claim would block whoever legitimately wants that name
+     next — often the same client moving to a different project here. Clearing
+     it is the first thing, before the new one is recorded, so a failure
+     halfway leaves the old domain working rather than neither. */
+  const previous = deployment.custom_domain;
+  if (previous && previous !== check.domain) {
+    if (deployment.repo_owner && deployment.repo_name) {
+      try {
+        await setPagesDomain(userId, deployment.repo_owner, deployment.repo_name, "");
+      } catch (err) {
+        console.error("[domain] could not clear the previous domain:", err);
+        return {
+          ok: false,
+          error:
+            "The previous domain could not be removed from GitHub Pages, so the new one was not connected. Try again in a moment.",
+        };
+      }
+    }
+    lastComparison.delete(deployment.id);
+  }
+
   saveDomain(deployment.id, { domain: check.domain, status: "dns-required", error: "" });
 
   /* Tell GitHub now when there is something to tell it about.
@@ -204,14 +261,59 @@ export async function connectDomain(
  * Every state here comes from an observation: a DNS answer, GitHub's own
  * Pages settings, or an HTTPS request that either worked or did not.
  */
+/**
+ * How often a check may actually go out to DNS and GitHub.
+ *
+ * Two windows, because two different things are being prevented.
+ *
+ * An **automatic** re-check is polling, and polling DNS every few seconds
+ * learns nothing: propagation is measured in minutes and a certificate in
+ * tens of minutes. A minute is already generous.
+ *
+ * A person **pressing Check again** is not polling — they have just typed
+ * four records into a registrar's panel and are asking the one question this
+ * screen exists to answer. Refusing to look would make the feature feel
+ * broken at precisely the moment it matters. So that path really looks, and
+ * the only thing held back is a stuck button: a couple of seconds, which no
+ * DNS change happens inside anyway.
+ */
+const AUTOMATIC_INTERVAL_MS = 60_000;
+const EXPLICIT_INTERVAL_MS = 3_000;
+
 export async function refreshDomain(
   projectId: string,
   userId: string,
-): Promise<{ ok: true; dns: DnsFinding } | { ok: false; error: string }> {
+  opts: { force?: boolean } = {},
+): Promise<{ ok: true; dns: DnsFinding; throttled?: boolean } | { ok: false; error: string }> {
   const deployment = getLatestDeployment(projectId);
   if (!deployment?.custom_domain) {
     return { ok: false, error: "No custom domain is connected." };
   }
+
+  /* An active domain does not need re-checking on a timer at all — it is
+     serving — so only an unfinished one is polled, and even then not faster
+     than the thing being waited for can change. */
+  const sinceLast = Date.now() - (deployment.domain_checked_at || 0);
+  const remembered = lastComparison.get(deployment.id);
+  const window = opts.force ? EXPLICIT_INTERVAL_MS : AUTOMATIC_INTERVAL_MS;
+  if (deployment.domain_checked_at && sinceLast < window && remembered) {
+    return {
+      ok: true,
+      throttled: true,
+      dns: {
+        aRecords: [], cnames: [],
+        pointsAtPages: deployment.domain_status === "active",
+        resolves: true,
+        comparison: {
+          records: remembered.records,
+          matched: remembered.records.filter((r) => r.found).length,
+          conflicts: [],
+          complete: remembered.records.every((r) => r.found),
+        },
+      },
+    };
+  }
+
   const host = deployment.repo_owner ? pagesHost(deployment.repo_owner) : "";
 
   let configuredCname = "";
@@ -241,6 +343,10 @@ export async function refreshDomain(
   if (state === "active" && deployment.repo_owner && deployment.repo_name) {
     await enforceHttps(userId, deployment.repo_owner, deployment.repo_name);
   }
+
+  // Remember which records were actually seen, so the screen can tick them
+  // off one by one rather than reporting a single pass/fail.
+  lastComparison.set(deployment.id, { at: Date.now(), records: dns.comparison.records });
 
   saveDomain(deployment.id, { status: state, error: detail, checked: true });
 
@@ -277,6 +383,7 @@ export async function disconnectDomain(
     }
   }
 
+  lastComparison.delete(deployment.id);
   saveDomain(deployment.id, { domain: "", status: "none", error: "" });
   if (deployment.pages_url) {
     db.prepare("UPDATE deployments SET url = ? WHERE id = ?").run(

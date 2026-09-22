@@ -66,6 +66,36 @@ Built-in hosting needs no configuration: deploying publishes the site to
 `/s/<slug>` immediately, which is what makes "deploy from a phone" real rather
 than aspirational.
 
+### Backup and recovery
+
+A project backup is one file containing the project, its website, its full
+version history, every uploaded image, the client previews and their
+approvals, and the publication metadata — including which GitHub repository
+the website is served from.
+
+It contains **no credentials**: no GitHub token, no Google token, no API key,
+no password and no session. A restored project asks for GitHub and Google to
+be connected again, which is the point rather than a limitation — a file that
+could re-open somebody's GitHub account is not something to keep on a memory
+stick. The export refuses to write a backup that would contain one, and the
+test suite reads the produced bytes to check.
+
+Every backup carries a format version, a file count, a per-image SHA-256 and a
+checksum over the whole manifest. A truncated, altered or partly-downloaded
+backup fails the matching check by name rather than restoring into a project
+that looks fine and is not.
+
+Restoring **always creates a new project**. There is no path that writes into
+an existing one. Where the backup records a repository and that name is still
+free here, the restored project reuses it, so recovering a project whose
+website is still live on GitHub Pages updates that site rather than creating a
+second one beside it.
+
+A backup is also taken automatically, to `<data>/backups/`, immediately before
+a project is deleted — the one irreversible operation in the application. That
+is not disaster recovery (a dead disk takes those copies too); the exported
+file kept elsewhere is.
+
 ### Publishing to GitHub Pages
 
 The production path is:
@@ -125,6 +155,8 @@ src/
     deploy.ts         the deployment engine: queue, staging, atomic publish
     deploy-model.ts   what a deployment is: row, slug, fingerprint
     deploy-view.ts    what a browser may know, and the custom-domain lifecycle
+    backup.ts         writing a portable project backup, secret-scanned
+    backup-restore.ts reading one, verifying it, and restoring as a new project
     providers/        one file per host: builtin, github, vercel, netlify
     github/           OAuth, API client and DNS/HTTPS checks for GitHub Pages
     svg.ts            SVG logo sanitiser
@@ -134,6 +166,7 @@ scripts/
   mobile-qa.mjs       the full-workflow mobile test harness
   github-qa.mjs       GitHub Pages publishing, against a mock GitHub and a
                       real DNS server
+  backup-qa.mjs       backup and recovery: export, damage, restore, secrets
 ```
 
 ### The Site document

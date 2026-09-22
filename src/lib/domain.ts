@@ -49,8 +49,41 @@ export const GITHUB_PAGES_IPS = [
 ];
 
 export type DomainCheck =
-  | { ok: true; domain: string; apex: boolean }
+  | { ok: true; domain: string; apex: boolean; kind: "apex" | "subdomain" }
   | { ok: false; error: string };
+
+/**
+ * Names that can never be a client's public website.
+ *
+ * Two groups, both reserved by the IETF and neither resolvable on the public
+ * internet: the special-use names (RFC 6761) and the documentation ones (RFC
+ * 2606). A certificate can never be issued for any of them, so connecting one
+ * would leave a domain stuck at "HTTPS pending" for ever with no explanation.
+ * Saying so at the point of typing is the only useful moment.
+ */
+const RESERVED_TLDS = new Set([
+  "localhost", "local", "localdomain", "internal", "intranet", "lan", "home",
+  "corp", "private", "test", "example", "invalid", "onion", "alt",
+]);
+
+/** Address ranges that are not reachable from the internet. */
+function isPrivateAddress(value: string): boolean {
+  const parts = value.split(".").map(Number);
+  if (parts.length !== 4 || parts.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) {
+    return false;
+  }
+  const [a, b] = parts;
+  return (
+    a === 10 ||
+    a === 127 ||
+    a === 0 ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168) ||
+    (a === 169 && b === 254) ||
+    (a === 100 && b >= 64 && b <= 127) ||
+    a >= 224
+  );
+}
 
 /**
  * Normalise and check a domain.
@@ -108,17 +141,56 @@ export function checkDomain(input: string): DomainCheck {
   }
   // An IP address is not a domain and cannot have a certificate issued for it.
   if (/^\d+(\.\d+)+$/.test(value)) {
-    return { ok: false, error: "Enter a domain name, not an IP address." };
+    return {
+      ok: false,
+      error: isPrivateAddress(value)
+        ? "That is a private network address, which the public internet cannot reach."
+        : "Enter a domain name, not an IP address.",
+    };
+  }
+  /* Reserved and internal names.
+     None of these resolve on the public internet and no certificate authority
+     will ever issue for them, so a domain like this would sit at "HTTPS
+     pending" until somebody gave up. Refusing it now, by name, saves that. */
+  if (RESERVED_TLDS.has(tld) || labels.includes("localhost")) {
+    return {
+      ok: false,
+      error: `.${tld} is a reserved name that only works inside a private network, so a public website cannot use it.`,
+    };
+  }
+  if (value.endsWith(".home.arpa") || value === "home.arpa" || value.endsWith(".in-addr.arpa")) {
+    return { ok: false, error: "That is an internal network name, not a public domain." };
   }
   // GitHub will not serve a Pages site under its own domains.
   if (value === "github.io" || value.endsWith(".github.io") || value.endsWith(".github.com")) {
     return { ok: false, error: "That is a GitHub address, not a domain you can connect." };
   }
 
-  return { ok: true, domain: value, apex: labels.length === 2 };
+  const apex = labels.length === 2;
+  return { ok: true, domain: value, apex, kind: apex ? "apex" : "subdomain" };
 }
 
-export type DnsRecord = { type: "A" | "CNAME"; name: string; value: string };
+export type DnsRecord = {
+  type: "A" | "CNAME";
+  /** What to type in the "host"/"name" column at the registrar. */
+  name: string;
+  value: string;
+  /** Seconds. A short TTL while a domain is being set up is a kindness. */
+  ttl: number;
+  /** Whether this exact record was found in DNS. Filled in by the checker. */
+  found?: boolean;
+};
+
+/**
+ * A TTL low enough that a mistake is cheap to fix.
+ *
+ * An hour is the usual registrar default and it is the wrong default while a
+ * domain is being connected: a typo cached for an hour is an hour of a client
+ * seeing the wrong thing. 3600 is what most panels will accept as a minimum
+ * without complaint, and 600 where they allow it — so 3600 is recommended and
+ * the copy alongside says shorter is better.
+ */
+export const RECOMMENDED_TTL = 3600;
 
 /**
  * The records that have to exist, given the shape of the domain.
@@ -132,8 +204,85 @@ export function requiredRecords(domain: string, pagesHost: string): DnsRecord[] 
   const check = checkDomain(domain);
   if (!check.ok) return [];
   if (check.apex) {
-    return GITHUB_PAGES_IPS.map((ip) => ({ type: "A" as const, name: "@", value: ip }));
+    return GITHUB_PAGES_IPS.map((ip) => ({
+      type: "A" as const,
+      name: "@",
+      value: ip,
+      ttl: RECOMMENDED_TTL,
+    }));
   }
-  const host = check.domain.split(".")[0];
-  return [{ type: "CNAME", name: host, value: pagesHost }];
+  // Everything before the registrable domain: "www", or "shop.eu" for a
+  // deeper name. Registrars want that, not the whole hostname.
+  const host = check.domain.split(".").slice(0, -2).join(".");
+  return [{ type: "CNAME", name: host, value: pagesHost, ttl: RECOMMENDED_TTL }];
+}
+
+/**
+ * Which of the required records are actually in DNS, and what is in the way.
+ *
+ * "DNS failed" is never a useful thing to tell somebody who has just spent
+ * twenty minutes in a registrar's control panel. Three of four A records
+ * present is a different problem from four records pointing at the old host,
+ * which is different again from a CNAME on an apex domain that a registrar
+ * should never have accepted — and each has a different next step.
+ */
+export type DnsComparison = {
+  records: DnsRecord[];
+  /** Required records that are present. */
+  matched: number;
+  /** Values that are there and should not be. */
+  conflicts: { type: "A" | "CNAME"; value: string; why: string }[];
+  /** True when every required record is present and nothing conflicts. */
+  complete: boolean;
+};
+
+export function compareDns(
+  domain: string,
+  pagesHost: string,
+  found: { aRecords: string[]; cnames: string[] },
+): DnsComparison {
+  const check = checkDomain(domain);
+  if (!check.ok) return { records: [], matched: 0, conflicts: [], complete: false };
+
+  const required = requiredRecords(check.domain, pagesHost);
+  const foundA = found.aRecords.map((v) => v.trim());
+  const foundCname = found.cnames.map((v) => v.toLowerCase().replace(/\.$/, ""));
+  const conflicts: DnsComparison["conflicts"] = [];
+
+  const records = required.map((record) => {
+    if (record.type === "A") return { ...record, found: foundA.includes(record.value) };
+    const target = record.value.toLowerCase();
+    return {
+      ...record,
+      // A CNAME to this project's Pages host, or to any github.io — an
+      // organisation may legitimately point at a differently-named site.
+      found: foundCname.some((c) => c === target || c.endsWith(".github.io")),
+    };
+  });
+
+  /* Anything present that is not wanted. An extra A record is not cosmetic:
+     a quarter of visitors would be sent to whatever it points at. */
+  for (const ip of foundA) {
+    if (!GITHUB_PAGES_IPS.includes(ip)) {
+      conflicts.push({
+        type: "A",
+        value: ip,
+        why: "This A record sends visitors somewhere that is not GitHub Pages. Remove it.",
+      });
+    }
+  }
+  for (const cname of foundCname) {
+    if (!cname.endsWith(".github.io")) {
+      conflicts.push({
+        type: "CNAME",
+        value: cname,
+        why: check.apex
+          ? "An apex domain cannot use a CNAME. Remove it and add the four A records below."
+          : "This CNAME points at a different service. Change it to the value below.",
+      });
+    }
+  }
+
+  const matched = records.filter((r) => r.found).length;
+  return { records, matched, conflicts, complete: matched === records.length && !conflicts.length };
 }

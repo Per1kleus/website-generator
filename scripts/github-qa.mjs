@@ -31,7 +31,9 @@ import path from "node:path";
 // Set before the module is imported: the resolver reads it when it is built.
 process.env.WG_DNS_SERVERS = `127.0.0.1:${11755}`;
 const { domainState, httpsWorks } = await import("../src/server/github/domain.ts");
-const { checkDomain, requiredRecords } = await import("../src/lib/domain.ts");
+const {
+  checkDomain, compareDns, requiredRecords, RECOMMENDED_TTL,
+} = await import("../src/lib/domain.ts");
 const { repoNameFor } = await import("../src/server/providers/github.ts");
 
 const APP_PORT = 3318;
@@ -497,7 +499,7 @@ try {
 
   console.log("\n=== Custom domains ===\n");
 
-  const DOMAIN = "clientbusiness.test";
+  const DOMAIN = "clientbusiness.gr";
 
   for (const [input, why] of [
     ["not a domain", "no dot"],
@@ -508,6 +510,16 @@ try {
     ["evil.com/../x", "traversal"],
     ["user@example.gr", "an @"],
     ["example.github.io", "a GitHub address"],
+    ["localhost", "localhost"],
+    ["myserver.localhost", "a localhost name"],
+    ["intranet.local", "a .local name"],
+    ["shop.internal", "an internal name"],
+    ["staging.test", "a reserved testing name"],
+    ["demo.example", "a documentation name"],
+    ["192.168.1.10", "a private IP address"],
+    ["10.0.0.1", "a private IP address in another range"],
+    ["127.0.0.1", "the loopback address"],
+    ["printer.home.arpa", "a home network name"],
   ]) {
     const res = await api(`/api/projects/${projectId}/deploy`, {
       method: "POST",
@@ -538,6 +550,7 @@ try {
 
   // Pointing somewhere else is a different state from pointing nowhere.
   await dnsControl({ set: { [DOMAIN]: { a: ["203.0.113.10"] } } });
+  await sleep(3200);
   const elsewhere = await api(`/api/projects/${projectId}/deploy`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -550,8 +563,54 @@ try {
     /203\.0\.113\.10/.test(elsewhere.json?.deployment?.domain_error ?? ""),
     elsewhere.json?.deployment?.domain_error ?? "");
 
-  // Now point it at GitHub Pages for real.
+  /* Partial DNS is its own state, and is said so.
+     Two of four A records is a website that works for half its visitors,
+     which looks like an intermittent fault to everybody involved. */
   await dnsControl({ set: { [DOMAIN]: { a: ["185.199.108.153", "185.199.109.153"] } } });
+  await sleep(3200);
+  const partial = await api(`/api/projects/${projectId}/deploy`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "check-domain" }),
+  });
+  record("partly-created DNS is counted, not called a failure",
+    /2 of 4 records/i.test(partial.json?.deployment?.domain_error ?? ""),
+    partial.json?.deployment?.domain_error ?? "");
+  const partialRecords = partial.json?.deployment?.domain_records ?? [];
+  record("...and each record is marked found or not, individually",
+    partialRecords.filter((r) => r.found === true).length === 2 &&
+      partialRecords.filter((r) => r.found === false).length === 2,
+    partialRecords.map((r) => `${r.value}:${r.found}`).join(" "));
+  record("...every record carries a TTL to type in",
+    partialRecords.every((r) => r.ttl === RECOMMENDED_TTL), String(partialRecords[0]?.ttl));
+  record("...and the domain is described as an apex domain",
+    partial.json?.deployment?.domain_kind === "apex",
+    partial.json?.deployment?.domain_kind ?? "");
+
+  /* A record pointing at something else entirely is a conflict, and the
+     message names the address rather than saying "DNS failed". */
+  await dnsControl({ set: { [DOMAIN]: { a: ["203.0.113.50", "185.199.108.153"] } } });
+  await sleep(3200);
+  const conflicting = await api(`/api/projects/${projectId}/deploy`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "check-domain" }),
+  });
+  record("a record pointing somewhere else is reported as a conflict",
+    /203\.0\.113\.50/.test(conflicting.json?.deployment?.domain_error ?? ""),
+    conflicting.json?.deployment?.domain_error ?? "");
+  record("...and says to remove it",
+    /remove it/i.test(conflicting.json?.deployment?.domain_error ?? ""));
+
+  // Now point it at GitHub Pages for real, with every record.
+  await dnsControl({
+    set: {
+      [DOMAIN]: {
+        a: ["185.199.108.153", "185.199.109.153", "185.199.110.153", "185.199.111.153"],
+      },
+    },
+  });
+  await sleep(3200);
   const detected = await api(`/api/projects/${projectId}/deploy`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -564,6 +623,35 @@ try {
     (detected.json?.dns?.aRecords ?? []).includes("185.199.108.153"),
     JSON.stringify(detected.json?.dns ?? {}));
 
+  /* Checking again immediately does not go back out to DNS.
+     Propagation is measured in minutes; a check every second would learn
+     nothing and spend somebody else's resolver budget to learn it. */
+  const firstCheck = await api(`/api/projects/${projectId}/deploy`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "check-domain" }),
+  });
+  const immediate = await api(`/api/projects/${projectId}/deploy`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "check-domain" }),
+  });
+  record("a double-press does not turn into two DNS lookups",
+    immediate.json?.throttled === true, String(immediate.json?.throttled));
+  record("...and still answers, with the last observation",
+    immediate.json?.deployment?.domain_status === firstCheck.json?.deployment?.domain_status,
+    immediate.json?.deployment?.domain_status ?? "");
+  // A considered retry a few seconds later must really look again, or the
+  // person who has just fixed their DNS would be told it is still wrong.
+  await sleep(3200);
+  const deliberate = await api(`/api/projects/${projectId}/deploy`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "check-domain" }),
+  });
+  record("...but pressing it again after a pause really checks",
+    deliberate.json?.throttled === false, String(deliberate.json?.throttled));
+
   // Publishing writes the CNAME file and tells GitHub.
   const withDomain = await publish(projectId);
   record("publishing with a domain connected succeeds",
@@ -574,6 +662,18 @@ try {
   const pagesState = await ghState(repoKey);
   record("...and GitHub Pages is told about the domain",
     pagesState.pages?.cname === DOMAIN, pagesState.pages?.cname ?? "");
+
+  /* The CNAME file must survive every subsequent publish.
+     The commit replaces the whole tree, so a file that is not in the bundle
+     is a file that is deleted — and deleting this one takes the client's
+     domain down. */
+  await publish(projectId);
+  const afterRepublish = await ghFile(repoKey, "CNAME");
+  record("the CNAME file survives a republish",
+    (afterRepublish ?? "").trim() === DOMAIN, JSON.stringify(afterRepublish));
+  const pagesAfterRepublish = await ghState(repoKey);
+  record("...and GitHub still has the domain configured",
+    pagesAfterRepublish.pages?.cname === DOMAIN, pagesAfterRepublish.pages?.cname ?? "");
 
   const pending = await api(`/api/projects/${projectId}/deploy`, {
     method: "POST",
@@ -605,7 +705,7 @@ try {
     activeState.state === "active", activeState.state);
 
   // Changing the domain.
-  const SECOND_DOMAIN = "www.clientbusiness.test";
+  const SECOND_DOMAIN = "www.clientbusiness.gr";
   await dnsControl({ set: { [SECOND_DOMAIN]: { cname: [`${OWNER}.github.io`] } } });
   const changedDomain = await api(`/api/projects/${projectId}/deploy`, {
     method: "POST",
@@ -627,6 +727,15 @@ try {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ action: "disconnect-domain" }),
   });
+  const afterChange = await ghState(repoKey);
+  record("...and the old domain is no longer claimed on GitHub",
+    afterChange.pages?.cname !== DOMAIN,
+    afterChange.pages?.cname ?? "cleared");
+
+  /* Disconnecting must not take anything else with it. */
+  const versionsBeforeDisconnect = (await api(`/api/projects/${projectId}/versions`)).json.versions.length;
+  const previewsBeforeDisconnect = (await api(`/api/projects/${projectId}/client-preview`)).json.previews.length;
+
   record("the domain can be removed", removed.status === 200);
   record("...leaving no domain on the project",
     removed.json?.deployment?.custom_domain === "");
@@ -636,6 +745,16 @@ try {
   const afterRemoval = await ghState(repoKey);
   record("...with GitHub told to stop using it", !afterRemoval.pages?.cname);
   record("...and the repository untouched", Boolean(afterRemoval.repo));
+  record("...its files untouched", afterRemoval.files.length > 0, `${afterRemoval.files.length} files`);
+  record("...the version history untouched",
+    (await api(`/api/projects/${projectId}/versions`)).json.versions.length === versionsBeforeDisconnect);
+  record("...the client previews untouched",
+    (await api(`/api/projects/${projectId}/client-preview`)).json.previews.length === previewsBeforeDisconnect);
+  record("...and the project is still publishable",
+    (await api(`/api/projects/${projectId}/deploy`)).json?.gate?.ok === true);
+  const afterDisconnectPublish = await publish(projectId);
+  record("...which it proves by publishing again",
+    afterDisconnectPublish.final?.deployment?.status === "live");
 
   /* ==================================================================
      Failure handling
@@ -766,7 +885,7 @@ try {
   const stealDomain = await api(`/api/projects/${projectId}/deploy`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ action: "connect-domain", domain: "stolen.test" }),
+    body: JSON.stringify({ action: "connect-domain", domain: "stolen.gr" }),
   });
   record("...nor point a domain at it", stealDomain.status !== 200, `status ${stealDomain.status}`);
   const stateAfterHijack = await ghState(repoKey);
@@ -814,12 +933,12 @@ try {
   await api(`/api/projects/${projectId}/deploy`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ action: "connect-domain", domain: "shared.test" }),
+    body: JSON.stringify({ action: "connect-domain", domain: "shared.gr" }),
   });
   const clash = await api(`/api/projects/${rivalId}/deploy`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ action: "connect-domain", domain: "shared.test" }),
+    body: JSON.stringify({ action: "connect-domain", domain: "shared.gr" }),
   });
   record("a domain already used by another project is refused", clash.status === 400,
     clash.json?.error ?? "");
@@ -856,6 +975,35 @@ try {
   record("an IP address is not a domain", checkDomain("185.199.108.153").ok === false);
   record("a single label is not a domain", checkDomain("localhost").ok === false);
   record("a 300-character name is refused", checkDomain(`${"a".repeat(300)}.gr`).ok === false);
+  record("an apex domain is labelled as one", checkDomain("example.gr").kind === "apex");
+  record("a subdomain is labelled as one", checkDomain("www.example.gr").kind === "subdomain");
+  record("a deeper subdomain names only its own part in the record",
+    requiredRecords("shop.eu.example.gr", "x.github.io")[0].name === "shop.eu",
+    requiredRecords("shop.eu.example.gr", "x.github.io")[0].name);
+  record("every record carries a TTL",
+    requiredRecords("example.gr", "x.github.io").every((r) => r.ttl > 0));
+
+  const allFour = compareDns("example.gr", "x.github.io", {
+    aRecords: ["185.199.108.153", "185.199.109.153", "185.199.110.153", "185.199.111.153"],
+    cnames: [],
+  });
+  record("four correct A records read as complete", allFour.complete && allFour.matched === 4);
+  const halfway = compareDns("example.gr", "x.github.io", {
+    aRecords: ["185.199.108.153"], cnames: [],
+  });
+  record("one of four reads as one of four", halfway.matched === 1 && !halfway.complete);
+  const apexCname = compareDns("example.gr", "x.github.io", {
+    aRecords: [], cnames: ["somewhere.else.net"],
+  });
+  record("a CNAME on an apex domain is called out as impossible",
+    apexCname.conflicts.some((c) => /apex domain cannot use a CNAME/i.test(c.why)),
+    JSON.stringify(apexCname.conflicts));
+  const wrongCname = compareDns("www.example.gr", "x.github.io", {
+    aRecords: [], cnames: ["old-host.net"],
+  });
+  record("a CNAME pointing at another service is called out",
+    wrongCname.conflicts.some((c) => /different service/i.test(c.why)),
+    JSON.stringify(wrongCname.conflicts));
 } catch (err) {
   console.error("\nQA harness crashed:", err);
   failures += 1;

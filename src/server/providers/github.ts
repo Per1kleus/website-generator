@@ -196,7 +196,10 @@ export const githubProvider: DeployProvider = {
       // A brand-new Pages site takes a minute or two to build. Saying "live"
       // is honest — the deployment succeeded — and the screen separately
       // shows what GitHub says about the build.
-      ...(check.ok ? { domain_status: "configuring" as const } : {}),
+      /* Telling GitHub about the domain invalidates whatever the last DNS
+         check concluded, so the next check really looks rather than
+         repeating an observation taken before the configuration changed. */
+      ...(check.ok ? { domain_status: "configuring" as const, domain_checked_at: 0 } : {}),
     };
 
     ctx.log("Published");

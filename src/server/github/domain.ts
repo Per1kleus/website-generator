@@ -1,6 +1,8 @@
 import "server-only";
 import { Resolver } from "node:dns/promises";
-import { checkDomain, GITHUB_PAGES_IPS, type DomainState } from "@/lib/domain";
+import {
+  checkDomain, compareDns, GITHUB_PAGES_IPS, type DnsComparison, type DomainState,
+} from "@/lib/domain";
 
 /**
  * Is the domain actually pointing here, and does HTTPS work?
@@ -40,11 +42,28 @@ export type DnsFinding = {
   pointsAtPages: boolean;
   /** True when the name resolves to something, whatever it is. */
   resolves: boolean;
+  /**
+   * Required record by required record, plus anything in the way.
+   *
+   * The aggregate answer is what the state machine needs; this is what the
+   * person reads. "Three of four A records detected" and "the CNAME points
+   * at the old host" are different afternoons.
+   */
+  comparison: DnsComparison;
+};
+
+const EMPTY_COMPARISON: DnsComparison = {
+  records: [], matched: 0, conflicts: [], complete: false,
 };
 
 export async function inspectDns(domain: string, pagesHost: string): Promise<DnsFinding> {
   const check = checkDomain(domain);
-  if (!check.ok) return { aRecords: [], cnames: [], pointsAtPages: false, resolves: false };
+  if (!check.ok) {
+    return {
+      aRecords: [], cnames: [], pointsAtPages: false, resolves: false,
+      comparison: EMPTY_COMPARISON,
+    };
+  }
 
   const r = resolver();
   const [aRecords, cnames] = await Promise.all([
@@ -68,6 +87,7 @@ export async function inspectDns(domain: string, pagesHost: string): Promise<Dns
     cnames,
     pointsAtPages: cnameMatch || aMatch,
     resolves: aRecords.length > 0 || cnames.length > 0,
+    comparison: compareDns(check.domain, pagesHost, { aRecords, cnames }),
   };
 }
 
@@ -93,6 +113,28 @@ export async function httpsWorks(domain: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/**
+ * Why DNS is not right yet, in terms of the records themselves.
+ *
+ * Never "DNS failed". Whatever is actually wrong is knowable from what came
+ * back, and the person reading this is standing in a registrar's control
+ * panel wondering which field to change.
+ */
+function explainPartialDns(dns: DnsFinding): string {
+  const { comparison } = dns;
+  if (comparison.conflicts.length) {
+    const first = comparison.conflicts[0];
+    return `${first.why} (found ${first.type} ${first.value}${comparison.conflicts.length > 1 ? `, and ${comparison.conflicts.length - 1} more` : ""})`;
+  }
+  if (comparison.records.length && comparison.matched > 0) {
+    return `${comparison.matched} of ${comparison.records.length} records are in place. Add the rest, marked below.`;
+  }
+  const found = [...dns.cnames, ...dns.aRecords].slice(0, 4).join(", ");
+  return found
+    ? `This domain currently points at ${found}, which is not GitHub Pages. Create the records below, then check again.`
+    : "This domain does not point at GitHub Pages yet.";
 }
 
 /**
@@ -123,7 +165,10 @@ export async function domainState(args: {
     return {
       state: "error",
       detail: check.error,
-      dns: { aRecords: [], cnames: [], pointsAtPages: false, resolves: false },
+      dns: {
+        aRecords: [], cnames: [], pointsAtPages: false, resolves: false,
+        comparison: EMPTY_COMPARISON,
+      },
     };
   }
 
@@ -139,14 +184,22 @@ export async function domainState(args: {
   }
 
   if (!dns.pointsAtPages) {
-    const found = [...dns.cnames, ...dns.aRecords].slice(0, 4).join(", ");
-    return {
-      state: "waiting-dns",
-      detail: found
-        ? `This domain currently points at ${found}, which is not GitHub Pages. Check the records below, then wait for the change to propagate.`
-        : "This domain does not point at GitHub Pages yet.",
-      dns,
-    };
+    return { state: "waiting-dns", detail: explainPartialDns(dns), dns };
+  }
+
+  /* Pointing at Pages, but not with every record.
+     Three of four A records is a site that works for three visitors in four,
+     which looks like an intermittent fault to everybody involved. It counts
+     as detected — the domain does reach GitHub — but it is said plainly. */
+  if (!dns.comparison.complete && dns.comparison.records.length > 1) {
+    const missing = dns.comparison.records.length - dns.comparison.matched;
+    if (missing > 0) {
+      return {
+        state: "dns-detected",
+        detail: `${dns.comparison.matched} of ${dns.comparison.records.length} records are in place. Add the ${missing} marked below — until all four exist, some visitors will not reach the site.`,
+        dns,
+      };
+    }
   }
 
   if (configuredCname.toLowerCase() !== check.domain) {

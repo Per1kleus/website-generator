@@ -114,6 +114,10 @@ export default async function ProjectPage({
     { href: `/projects/${id}/languages`, label: "Languages", hint: project.site ? project.site.meta.locales.map((l) => localeInfo(l).short).join(" · ") : "—", Icon: IconGlobe },
     { href: `/projects/${id}/versions`, label: "Versions", hint: `${versions.length} saved`, Icon: IconLayers },
     { href: `/projects/${id}/export`, label: "Export", hint: "Download a ZIP", Icon: IconDownload },
+    // The website ZIP and a project backup answer different questions: one is
+    // the finished site to hand somewhere else, the other is everything
+    // needed to rebuild this project if this machine is gone.
+    { href: `/projects/${id}/backup`, label: "Backup", hint: `${versions.length} versions, ${assets.length} images`, Icon: IconLayers },
     // Only offered once there is a website to show or publish, so the screen
     // does not list actions that cannot do anything yet.
     ...(project.site
