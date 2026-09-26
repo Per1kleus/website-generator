@@ -2,7 +2,8 @@ import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import { getCurrentUser } from "@/server/auth";
 import { getProject } from "@/server/projects";
-import { connectionInfo, googleConfigured } from "@/server/google/oauth";
+import { googleConfigured } from "@/server/google/oauth";
+import { googleAccess } from "@/server/google/credentials";
 import { getMenuSource } from "@/server/menu/source";
 import { MenuDataManager } from "@/components/MenuDataManager";
 
@@ -25,7 +26,7 @@ export default async function MenuDataPage({
       projectId={id}
       businessName={project.business_name}
       initialSource={getMenuSource(id)}
-      initialGoogle={{ ...connectionInfo(user.id), configured: googleConfigured() }}
+      initialGoogle={{ ...googleAccess(id, user.id), configured: googleConfigured() }}
     />
   );
 }

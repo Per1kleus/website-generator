@@ -138,6 +138,12 @@ export type BackupIntegrations = {
     spreadsheet_id: string;
     spreadsheet_name: string;
     sheet_title: string;
+    /* The Drive folder of dish photographs, when one was connected. A folder
+       id is not a credential — it names a place, and opening it still needs a
+       Google account that has been given access. Optional, so a backup written
+       before folders existed still validates. */
+    drive_folder_id?: string;
+    drive_folder_name?: string;
     status: string;
     last_sync_at: number;
   } | null;

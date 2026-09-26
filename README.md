@@ -51,7 +51,7 @@ starts the download in the background, so a phone user is never waiting on it.
 | `OLLAMA_HOST` | Where the Ollama daemon lives. Default `http://127.0.0.1:11434`. |
 | `WG_OLLAMA_MODEL` | Which local model writes design queries. Default `qwen2.5:0.5b`. |
 | `WG_OLLAMA_AUTOPULL` | Set to `0` to never download a model automatically. |
-| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Enables the Google Sheets menu source for Digital Menu projects. |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Enables the Google Sheets menu source for Digital Menu projects, Analytics and Search Console reports, and client connection links. One redirect URI serves every flow. |
 | `WG_SECRET` | Encrypts stored Google tokens at rest. **Set this** on any deployment that holds more than your own tokens. |
 | `GEMINI_API_KEY` | Enables business research (grounded in Google Search), visual identity analysis, content generation, translation and free-form AI editing. Without it the app still works end to end from the creator's own input, using a template generator and a rule-based editor. |
 | `WG_GEMINI_MODEL` | Which Gemini model those features use. Default `gemini-2.5-pro`. |
@@ -238,6 +238,34 @@ the granted scopes, so there is no path from it to a token.
 Failures are translated once, in `lib/google-errors.ts`, into a sentence and a
 next step. The raw reason goes to the server log, where a failure is actually
 diagnosed.
+
+### A client's own Google account, per project
+
+The developer owns the OAuth *application*; the client owns the Google
+*account*. A creator sends one link — `/connect/<token>` — and the client signs
+in to Google themselves, grants only what their own project needs, and picks
+their own Analytics property, menu spreadsheet and photograph folder. No
+password is shared and no credential is handed over.
+
+It is the same OAuth implementation, extended rather than duplicated. Every
+Google call already took a `userId`, which was really answering *which stored
+credential should this use?* — so that parameter became a **subject**
+(`server/google/subject.ts`): a bare id is still a creator, and `project:<id>`
+is a client's connection in `project_google_accounts`. A project prefers its
+own and falls back to the creator's, which is why an existing installation
+keeps working with nothing reconnected.
+
+The token in the link is the whole authorisation: 32 bytes of randomness, the
+same construction `client-preview.ts` uses. It determines the project — no
+request in the flow carries a project id — and an unknown, withdrawn, expired
+or orphaned token is answered identically, so probing reveals nothing.
+
+Scopes come from the project's kind, so a brochure website's link is incapable
+of asking for Drive, and incremental consent is switched off so a permission
+granted elsewhere is not quietly re-granted. And "connected" means the chosen
+resource was actually read with the credentials that were just granted — the
+gap between pressing Allow and a working connection is where a client's menu
+ends up empty on opening night.
 
 ### Research, and never inventing anything
 
@@ -542,6 +570,10 @@ name | price | description | chefs choice | category | imageurl
   read from the sheet, never hardcoded, and only ones with items are rendered.
 - **`imageurl`** takes a Google Drive link, in any of the shapes people
   actually paste — `/file/d/…`, `?id=…`, `/thumbnail?id=…`, or a bare file id.
+  When a photograph folder is connected it also takes a plain **file name**,
+  `moussaka.jpg` or just `moussaka`, matched exactly and then ignoring case and
+  extension. The contract itself is unchanged: the same six headers, the same
+  column, and every existing sheet keeps working.
 
 ### Images are fetched, not hot-linked
 
@@ -550,7 +582,8 @@ through an interstitial, need the viewer's own Google session, and are rate
 limited. So each image is downloaded once server-side with the creator's
 credentials, run through the same pipeline as an uploaded photo (EXIF stripped,
 resized, WebP), and served from the site. The customer's browser never touches
-Google.
+Google — including when the photographs live in a client's private Drive folder
+that the browser could not open even if it tried.
 
 ### One bad row never breaks the menu
 
@@ -704,17 +737,31 @@ layouts:
 
 ```bash
 npm start &
-npm run test:mobile     # 207 checks: the whole product on a phone
-npm run test:design     # 21 checks: the design engine across all its tiers
-npm run test:menu       # 47 checks: the Google Sheets menu pipeline
-npm run test:desktop    # 36 checks: the packaged desktop app
-npm run test:setup      # 40 checks: first launch, second launch, recovery
-npm run test:gemini     # 49 checks: the hosted model, its contracts and failures
-npm run test:design-systems  # 59 checks: layout, tokens, heuristics, critic
-npm run test:site       # 198 checks: visual QA, SEO and image intelligence
-npm run test:preview    # 60 checks: the integrated live preview
-npm run test:studio     # 157 checks: editing, versions, projects, performance, readiness
+npm run test:mobile     # 223 checks: the whole product on a phone
+npm run test:design     #  21 checks: the design engine across all its tiers
+npm run test:menu       #  93 checks: the Google Sheets menu pipeline
+npm run test:desktop    #  55 checks: the packaged desktop app
+npm run test:setup      #  40 checks: first launch, second launch, recovery
+npm run test:gemini     #  75 checks: the hosted model, its contracts and failures
+npm run test:design-systems  #  59 checks: layout, tokens, heuristics, critic
+npm run test:site       # 282 checks: visual QA, SEO and image intelligence
+npm run test:preview    #  60 checks: the integrated live preview
+npm run test:studio     # 230 checks: editing, versions, projects, performance, readiness
+npm run test:github     # 175 checks: private repository, Pages, custom domains
+npm run test:backup     #  95 checks: export, inspect, restore, and what is excluded
+npm run test:connect    #  77 checks: client Google connection links
 ```
+
+1,485 checks in all, and CI runs every one of them on every push.
+
+`test:connect` runs two Google accounts against `scripts/mock-google.mjs`,
+because one cannot demonstrate the property that matters: it connects two
+projects to two different accounts and then tries, deliberately, to cross them.
+It also reads the produced HTTP responses, the rendered website, the backup
+archive and the server's own log for anything token-shaped — a credential that
+leaks will leak through a response, so that is where it looks. What a mock
+cannot cover is Google's own consent screen, and the suite says so rather than
+claiming an end-to-end run it did not perform.
 
 `test:studio` covers the five studio systems against the things they claim.
 It asserts that an edit does not start a generation job — "it did not

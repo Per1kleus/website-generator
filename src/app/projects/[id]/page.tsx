@@ -18,7 +18,7 @@ import { getMenuSource } from "@/server/menu/source";
 import { AppBar, Banner, Card, LinkButton } from "@/components/ui";
 import {
   IconDownload, IconEye, IconGlobe, IconImage, IconLayers, IconPalette,
-  IconPencil, IconRocket, IconSettings, IconSheet,
+  IconPencil, IconRocket, IconSettings, IconSheet, IconUser,
 } from "@/components/icons";
 import { SITE_KINDS } from "@/lib/site";
 import { assessReadiness } from "@/lib/checklist";
@@ -27,6 +27,7 @@ import { renderSite } from "@/lib/render";
 import { getLatestDeployment, hasUnpublishedChanges } from "@/server/deploy";
 import { approvalState } from "@/server/client-preview";
 import { getProperty } from "@/server/google/insights";
+import { connectionView } from "@/server/connect/verify";
 
 export async function generateMetadata({
   params,
@@ -95,6 +96,9 @@ export default async function ProjectPage({
   const changesPending = hasUnpublishedChanges(id, project.site);
   const analyticsProperty = getProperty(id, "analytics");
   const searchProperty = getProperty(id, "searchConsole");
+  // Whether the client's own Google account is authorising this project, and
+  // whether the services it grants have actually been proved to work.
+  const clientGoogle = connectionView(project);
   const errors = findings.filter((f) => f.level === "error");
   const warnings = findings.filter((f) => f.level === "warning");
 
@@ -142,6 +146,19 @@ export default async function ProjectPage({
                   : "Live and up to date"
                 : "Put it online",
             Icon: IconRocket,
+          },
+          {
+            href: `/projects/${id}/connection`,
+            label: "Client Google",
+            hint:
+              clientGoogle.status === "connected"
+                ? `Connected${clientGoogle.email ? ` · ${clientGoogle.email}` : ""}`
+                : clientGoogle.status === "partially_connected"
+                  ? "Partly connected"
+                  : clientGoogle.status === "not_connected"
+                    ? "Send a connection link"
+                    : "Needs attention",
+            Icon: IconUser,
           },
           {
             href: `/projects/${id}/insights`,

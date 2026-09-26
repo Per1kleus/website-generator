@@ -2,6 +2,7 @@ import "server-only";
 import { key, newId, type Section, type Site } from "@/lib/site";
 import type { Locale } from "@/lib/locales";
 import { readValues } from "../google/api";
+import type { Subject } from "../google/subject";
 import { GoogleError } from "../google/api";
 import { fillMissingStrings } from "../translate";
 import { resolveImage } from "./drive-images";
@@ -54,18 +55,21 @@ function categoryKey(name: string): string {
 }
 
 export async function syncMenu(args: {
-  userId: string;
+  /** Whose Google credentials to read with. See google/subject.ts. */
+  subject: Subject;
   projectId: string;
   site: Site;
   spreadsheetId: string;
   sheetTitle: string;
   /** Re-download every image rather than reusing what is already stored. */
   refreshImages?: boolean;
+  /** The Drive folder to resolve bare file names in, when one is connected. */
+  driveFolderId?: string;
 }): Promise<SyncOutcome> {
   /* 1. Retrieve ---------------------------------------------------------- */
   let values: string[][];
   try {
-    values = await readValues(args.userId, args.spreadsheetId, args.sheetTitle);
+    values = await readValues(args.subject, args.spreadsheetId, args.sheetTitle);
   } catch (err) {
     const google = err instanceof GoogleError;
     return {
@@ -105,11 +109,12 @@ export async function syncMenu(args: {
   for (const item of parsed.items) {
     if (!item.imageUrlRaw) continue;
     const resolution = await resolveImage({
-      userId: args.userId,
+      subject: args.subject,
       projectId: args.projectId,
       raw: item.imageUrlRaw,
       alt: item.name,
       force: args.refreshImages,
+      folderId: args.driveFolderId,
     });
 
     if (resolution.kind === "asset") {

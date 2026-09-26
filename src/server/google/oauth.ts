@@ -3,6 +3,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { db } from "../db";
 import { decryptSecret, encryptSecret } from "../crypto";
 import { isDesktop } from "../runtime";
+import { grantedServices, parseSubject, type ConnectService, type Subject } from "./subject";
 
 /**
  * Google OAuth for the builder application.
@@ -103,17 +104,36 @@ export function redirectUri(origin: string): string {
   );
 }
 
-export function authorizeUrl(origin: string, state: string, extra: readonly string[] = []): string {
+/**
+ * The consent URL.
+ *
+ * `extra` adds to the base scopes for a creator connecting their own account —
+ * the incremental case, where `include_granted_scopes` keeps what was already
+ * approved rather than replacing it.
+ *
+ * `opts.exact` instead asks for precisely the scopes given and nothing else,
+ * which is what a client connection link uses. Incremental consent is exactly
+ * wrong there: it would quietly re-grant a permission that a different project
+ * once needed, and the whole point of the link is that a brochure website asks
+ * for read access to analytics and for nothing that touches Drive.
+ */
+export function authorizeUrl(
+  origin: string,
+  state: string,
+  extra: readonly string[] = [],
+  opts: { exact?: boolean } = {},
+): string {
+  const scope = opts.exact ? [...extra] : [...SCOPES, ...extra];
   const params = new URLSearchParams({
     client_id: process.env.GOOGLE_CLIENT_ID ?? "",
     redirect_uri: redirectUri(origin),
     response_type: "code",
-    scope: [...SCOPES, ...extra].join(" "),
+    scope: scope.join(" "),
     // offline + consent so a refresh token is actually issued, otherwise a
     // sync would stop working an hour after connecting.
     access_type: "offline",
     prompt: "consent",
-    include_granted_scopes: "true",
+    include_granted_scopes: opts.exact ? "false" : "true",
     state,
   });
 
@@ -136,7 +156,29 @@ export type GoogleAccount = {
   updated_at: number;
 };
 
-type Row = GoogleAccount;
+type Row = Omit<GoogleAccount, "user_id">;
+
+/* -------------------------------------------------------------------------
+   Where a subject's tokens live.
+
+   Two tables, one shape, one set of rules. The creator's connection is keyed
+   by user and the client's by project; everything after this function — the
+   refresh, the encryption, the slack before expiry, the preservation of an
+   old refresh token — is deliberately identical, because a second token store
+   would eventually disagree with this one about when a token is still valid.
+
+   The table and column names come from this module, never from a caller, so
+   there is nothing here a request could steer.
+------------------------------------------------------------------------- */
+
+type Store = { table: string; column: string; key: string; project: boolean };
+
+function storeFor(subject: Subject): Store {
+  const parsed = parseSubject(subject);
+  return parsed.kind === "project"
+    ? { table: "project_google_accounts", column: "project_id", key: parsed.id, project: true }
+    : { table: "google_accounts", column: "user_id", key: parsed.id, project: false };
+}
 
 /** Never returns tokens — only what the UI is allowed to know. */
 export function connectionInfo(userId: string): { connected: boolean; email: string } {
@@ -214,19 +256,55 @@ export function disconnect(userId: string): void {
 }
 
 function saveTokens(
-  userId: string,
+  subject: Subject,
   tokens: { access_token: string; refresh_token?: string; expires_in?: number; scope?: string },
   email: string,
+  opts: { connectedBy?: "client" | "owner" } = {},
 ) {
   const now = Date.now();
+  const store = storeFor(subject);
   const existing = db
-    .prepare("SELECT refresh_token FROM google_accounts WHERE user_id = ?")
-    .get(userId) as { refresh_token: string } | undefined;
+    .prepare(`SELECT refresh_token FROM ${store.table} WHERE ${store.column} = ?`)
+    .get(store.key) as { refresh_token: string } | undefined;
 
   // Google omits refresh_token on re-consent in some flows; keep the old one.
   const refresh = tokens.refresh_token
     ? encryptSecret(tokens.refresh_token)
     : (existing?.refresh_token ?? "");
+
+  // A project row records only what Google said it granted. Assuming the base
+  // scopes would be a lie about a client who approved less, and the whole
+  // point of per-service status is that the application knows the difference.
+  const scope = tokens.scope ?? (store.project ? "" : SCOPES.join(" "));
+
+  if (store.project) {
+    db.prepare(
+      `INSERT INTO project_google_accounts
+         (project_id, email, access_token, refresh_token, expires_at, scope,
+          connected_by, revoked_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+       ON CONFLICT(project_id) DO UPDATE SET
+         email = excluded.email,
+         access_token = excluded.access_token,
+         refresh_token = excluded.refresh_token,
+         expires_at = excluded.expires_at,
+         scope = excluded.scope,
+         connected_by = excluded.connected_by,
+         revoked_at = 0,
+         updated_at = excluded.updated_at`,
+    ).run(
+      store.key,
+      email,
+      encryptSecret(tokens.access_token),
+      refresh,
+      now + (tokens.expires_in ?? 3600) * 1000,
+      scope,
+      opts.connectedBy ?? "client",
+      now,
+      now,
+    );
+    return;
+  }
 
   db.prepare(
     `INSERT INTO google_accounts
@@ -240,23 +318,78 @@ function saveTokens(
        scope = excluded.scope,
        updated_at = excluded.updated_at`,
   ).run(
-    userId,
+    store.key,
     email,
     encryptSecret(tokens.access_token),
     refresh,
     now + (tokens.expires_in ?? 3600) * 1000,
-    tokens.scope ?? SCOPES.join(" "),
+    scope,
     now,
     now,
   );
 }
 
+/**
+ * What one project's own Google connection is, without any credential.
+ *
+ * The shape the connection screens are allowed to see: an address, what was
+ * granted, who connected it and when. There is no path from here to a token.
+ */
+export type ProjectConnection = {
+  email: string;
+  services: ConnectService[];
+  connectedBy: string;
+  connectedAt: number;
+  updatedAt: number;
+  expiresAt: number;
+};
+
+export function projectConnection(projectId: string): ProjectConnection | null {
+  const row = db
+    .prepare(
+      `SELECT email, scope, connected_by, created_at, updated_at, expires_at
+         FROM project_google_accounts WHERE project_id = ?`,
+    )
+    .get(projectId) as
+    | {
+        email: string;
+        scope: string;
+        connected_by: string;
+        created_at: number;
+        updated_at: number;
+        expires_at: number;
+      }
+    | undefined;
+  if (!row) return null;
+  return {
+    email: row.email ?? "",
+    services: grantedServices(row.scope ?? ""),
+    connectedBy: row.connected_by ?? "client",
+    connectedAt: row.created_at,
+    updatedAt: row.updated_at,
+    expiresAt: row.expires_at,
+  };
+}
+
+/**
+ * Forget a project's Google credentials.
+ *
+ * Only the credentials. The website, the menu data already synced, the
+ * published versions and the Analytics history all belong to the client and
+ * are left exactly where they are; nothing in the client's Google account is
+ * touched either. Disconnecting is withdrawing permission, not deleting work.
+ */
+export function disconnectProject(projectId: string): void {
+  db.prepare("DELETE FROM project_google_accounts WHERE project_id = ?").run(projectId);
+}
+
 export async function exchangeCode(
-  userId: string,
+  subject: Subject,
   code: string,
   origin: string,
   state = "",
-): Promise<{ ok: true } | { ok: false; error: string }> {
+  opts: { connectedBy?: "client" | "owner" } = {},
+): Promise<{ ok: true; scope: string; email: string } | { ok: false; error: string }> {
   try {
     const form: Record<string, string> = {
       code,
@@ -300,17 +433,23 @@ export async function exchangeCode(
       // The address is only a display convenience; the connection still works.
     }
 
+    const scope = typeof data.scope === "string" ? data.scope : "";
+
     saveTokens(
-      userId,
+      subject,
       {
         access_token: data.access_token,
         refresh_token: typeof data.refresh_token === "string" ? data.refresh_token : undefined,
         expires_in: typeof data.expires_in === "number" ? data.expires_in : undefined,
-        scope: typeof data.scope === "string" ? data.scope : undefined,
+        scope: scope || undefined,
       },
       email,
+      opts,
     );
-    return { ok: true };
+    // The granted scopes are returned, not just stored: whoever started the
+    // flow has to be able to say which permissions were actually approved,
+    // and Google's answer is the only honest source for that.
+    return { ok: true, scope, email };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : "Token exchange failed." };
   }
@@ -318,12 +457,16 @@ export async function exchangeCode(
 
 /**
  * A usable access token, refreshing when it is close to expiry.
- * Returns null when the creator has not connected or the grant was revoked.
+ *
+ * Returns null when the subject has not connected or the grant was revoked.
+ * The token is returned to the caller inside the server and nowhere else: no
+ * route serialises it, no page renders it, and the value is never logged.
  */
-export async function accessTokenFor(userId: string): Promise<string | null> {
-  const row = db.prepare("SELECT * FROM google_accounts WHERE user_id = ?").get(userId) as
-    | Row
-    | undefined;
+export async function accessTokenFor(subject: Subject): Promise<string | null> {
+  const store = storeFor(subject);
+  const row = db
+    .prepare(`SELECT * FROM ${store.table} WHERE ${store.column} = ?`)
+    .get(store.key) as Row | undefined;
   if (!row) return null;
 
   // 60s of slack so a token cannot expire mid-request.
@@ -352,11 +495,15 @@ export async function accessTokenFor(userId: string): Promise<string | null> {
     if (!res.ok || typeof data.access_token !== "string") return null;
 
     saveTokens(
-      userId,
+      subject,
       {
         access_token: data.access_token,
         expires_in: typeof data.expires_in === "number" ? data.expires_in : undefined,
-        scope: typeof data.scope === "string" ? data.scope : undefined,
+        // A refresh response often omits the scope. Keeping the stored one is
+        // right — refreshing cannot widen or narrow what was granted — and
+        // guessing the base scopes here would overwrite a client's narrower
+        // grant with a claim they never made.
+        scope: typeof data.scope === "string" ? data.scope : row.scope,
       },
       row.email,
     );

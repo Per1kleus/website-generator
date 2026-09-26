@@ -532,12 +532,16 @@ export async function restoreBackup(
   if (menu) {
     db.prepare(
       `INSERT INTO menu_sources (project_id, provider, spreadsheet_id, spreadsheet_name,
-                                 sheet_title, status, last_sync_at, last_error, stats,
+                                 sheet_title, drive_folder_id, drive_folder_name,
+                                 status, last_sync_at, last_error, stats,
                                  findings, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, 'disconnected', ?, '', '{}', '[]', ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'disconnected', ?, '', '{}', '[]', ?, ?)`,
     ).run(
       projectId, menu.provider, menu.spreadsheet_id, menu.spreadsheet_name,
-      menu.sheet_title, menu.last_sync_at || 0, now, now,
+      menu.sheet_title,
+      // Absent in a backup written before photograph folders existed.
+      menu.drive_folder_id ?? "", menu.drive_folder_name ?? "",
+      menu.last_sync_at || 0, now, now,
     );
     notes.push("The menu spreadsheet was restored. Reconnect Google to sync it again.");
   }

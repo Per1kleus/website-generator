@@ -20,6 +20,9 @@ export type MenuSource = {
   spreadsheet_id: string;
   spreadsheet_name: string;
   sheet_title: string;
+  /** The Drive folder the dish photographs live in. Empty when unused. */
+  drive_folder_id: string;
+  drive_folder_name: string;
   status: "disconnected" | "configured" | "synced" | "error";
   last_sync_at: number;
   last_error: string;
@@ -104,6 +107,34 @@ export function recordSync(
     now,
     projectId,
   );
+}
+
+/**
+ * Point a menu at the Drive folder its photographs are in.
+ *
+ * Separate from `setMenuSource` because the two are chosen at different times
+ * and by different people: a creator picks the spreadsheet while building, and
+ * the client picks their own photograph folder when they connect their Google
+ * account. Writing one must not blank the other.
+ *
+ * A row is created if the spreadsheet has not been chosen yet, so the order
+ * the two happen in does not matter.
+ */
+export function setMenuDriveFolder(
+  projectId: string,
+  folder: { id: string; name: string },
+): MenuSource {
+  const now = Date.now();
+  db.prepare(
+    `INSERT INTO menu_sources
+       (project_id, provider, drive_folder_id, drive_folder_name, created_at, updated_at)
+     VALUES (?, 'google-sheets', ?, ?, ?, ?)
+     ON CONFLICT(project_id) DO UPDATE SET
+       drive_folder_id = excluded.drive_folder_id,
+       drive_folder_name = excluded.drive_folder_name,
+       updated_at = excluded.updated_at`,
+  ).run(projectId, folder.id, folder.name, now, now);
+  return getMenuSource(projectId)!;
 }
 
 export function disconnectMenuSource(projectId: string): void {

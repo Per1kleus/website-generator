@@ -19,6 +19,7 @@ import { GoogleConnection } from "./GoogleConnection";
 
 type Google = { connected: boolean; email: string; configured: boolean };
 type Sheet = { id: string; name: string; modifiedTime: string };
+type Folder = { id: string; name: string };
 type Tab = { title: string; sheetId: number; rowCount: number };
 type Finding = {
   level: "error" | "warning";
@@ -53,6 +54,8 @@ export function MenuDataManager({
   const [search, setSearch] = useState("");
   const [chosen, setChosen] = useState<Sheet | null>(null);
   const [tabs, setTabs] = useState<Tab[]>([]);
+  const [folderPicker, setFolderPicker] = useState(false);
+  const [folders, setFolders] = useState<Folder[]>([]);
   const { toast, toastNode } = useToast();
 
   // The OAuth callback returns here with a result in the query string.
@@ -117,7 +120,11 @@ export function MenuDataManager({
     setBusy("sheets");
     setError("");
     try {
-      const res = await fetch(`/api/google/spreadsheets?q=${encodeURIComponent(q)}`);
+      // Scoped to this project, so the list comes from whichever Google
+      // account authorised it — the client's own when they connected one.
+      const res = await fetch(
+        `/api/google/spreadsheets?projectId=${encodeURIComponent(projectId)}&q=${encodeURIComponent(q)}`,
+      );
       const data = await res.json();
       if (!res.ok) {
         setError(data.error ?? "Could not list your spreadsheets.");
@@ -135,7 +142,9 @@ export function MenuDataManager({
     setChosen(sheet);
     setBusy("tabs");
     try {
-      const res = await fetch(`/api/google/tabs?spreadsheetId=${encodeURIComponent(sheet.id)}`);
+      const res = await fetch(
+        `/api/google/tabs?projectId=${encodeURIComponent(projectId)}&spreadsheetId=${encodeURIComponent(sheet.id)}`,
+      );
       const data = await res.json();
       if (!res.ok) {
         setError(data.error ?? "Could not read that spreadsheet.");
@@ -163,6 +172,40 @@ export function MenuDataManager({
     // Configuring without syncing would leave the creator staring at a
     // connected-but-empty state, so pull the data immediately.
     await sync(false);
+  }
+
+  /* The photograph folder.
+     Optional, and worth the extra screen: with it, an `imageurl` cell can say
+     `moussaka.jpg` instead of a 90-character sharing URL, which is the step
+     where a restaurant owner filling in a spreadsheet actually gives up. */
+  async function openFolders() {
+    setFolderPicker(true);
+    setBusy("folders");
+    setError("");
+    try {
+      const res = await fetch(`/api/google/folders?projectId=${encodeURIComponent(projectId)}`);
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error ?? "Could not list your Drive folders.");
+        return;
+      }
+      setFolders(data.folders as Folder[]);
+    } catch {
+      setError("Could not reach Google.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function useFolder(folder: Folder) {
+    const done = await post(
+      { action: "configure-folder", folderId: folder.id, folderName: folder.name },
+      "configure-folder",
+    );
+    if (done) {
+      setFolderPicker(false);
+      toast("Photograph folder connected");
+    }
   }
 
   async function sync(refreshImages: boolean) {
@@ -370,11 +413,69 @@ export function MenuDataManager({
             consistency — only categories with items are shown.
           </li>
           <li>
-            <code>imageurl</code> takes a Google Drive link. Images are fetched
-            once and served from your site, not hot-linked from Drive.
+            <code>imageurl</code> takes a Google Drive link{source?.drive_folder_id ? (
+              <>
+                {" "}
+                — or, now that a photograph folder is connected, just the file
+                name, such as <code>moussaka.jpg</code>
+              </>
+            ) : null}
+            . Images are fetched once and served from your site, not hot-linked
+            from Drive.
           </li>
         </ul>
       </Card>
+
+      {google.connected && (
+        <Card className="my-4">
+          <h2 className="font-bold">Photograph folder</h2>
+          <p className="mt-1.5 text-sm text-muted">
+            {source?.drive_folder_id
+              ? `Dish photographs are looked up in “${source.drive_folder_name || "the connected folder"}”, so the imageurl column can be just a file name.`
+              : "Optional. Connect the Drive folder your dish photographs are in and the imageurl column can be a plain file name instead of a sharing link."}
+          </p>
+          {folderPicker ? (
+            <div className="mt-3">
+              {busy === "folders" && <p className="text-sm text-muted">Loading…</p>}
+              {busy !== "folders" && folders.length === 0 && (
+                <p className="text-sm text-muted">No folders found in the connected account.</p>
+              )}
+              <ul className="space-y-2">
+                {folders.map((folder) => (
+                  <li key={folder.id}>
+                    <button
+                      type="button"
+                      onClick={() => void useFolder(folder)}
+                      data-choose-folder={folder.id}
+                      className="min-h-[var(--spacing-touch)] w-full rounded-xl border border-line px-3 text-left text-sm font-semibold hover:bg-elevated"
+                    >
+                      {folder.name}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              <Button variant="secondary" className="mt-2" onClick={() => setFolderPicker(false)}>
+                Cancel
+              </Button>
+            </div>
+          ) : (
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Button variant="secondary" onClick={() => void openFolders()} data-pick-folder>
+                {source?.drive_folder_id ? "Change folder" : "Choose a folder"}
+              </Button>
+              {source?.drive_folder_id && (
+                <Button
+                  variant="secondary"
+                  loading={busy === "disconnect-folder"}
+                  onClick={() => void post({ action: "disconnect-folder" }, "disconnect-folder")}
+                >
+                  Remove
+                </Button>
+              )}
+            </div>
+          )}
+        </Card>
+      )}
 
       {google.connected && (
         <Card className="my-4">

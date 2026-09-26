@@ -4,7 +4,8 @@ import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import sharp from "sharp";
 import { db, UPLOAD_DIR } from "../db";
-import { downloadDriveFile, driveFileMeta, GoogleError } from "../google/api";
+import { downloadDriveFile, driveFileMeta, findInFolder, GoogleError } from "../google/api";
+import type { Subject } from "../google/subject";
 import { focalPoint } from "../images";
 
 /**
@@ -74,16 +75,45 @@ function cachedAsset(projectId: string, fileId: string): string | null {
  * a replaced Drive image actually reaches the menu.
  */
 export async function resolveImage(args: {
-  userId: string;
+  /** Whose Google credentials to read with. See google/subject.ts. */
+  subject: Subject;
   projectId: string;
   raw: string;
   alt: string;
   force?: boolean;
+  /**
+   * The Drive folder the menu's photographs live in, when one is connected.
+   *
+   * Its only job is to let an `imageurl` cell say `moussaka.jpg` instead of a
+   * 90-character sharing URL. That is not a cosmetic difference: pasting
+   * thirty sharing URLs correctly is the step where a real restaurant owner
+   * gives up, and typing a file name is not.
+   */
+  folderId?: string;
 }): Promise<ImageResolution> {
   const raw = (args.raw ?? "").trim();
   if (!raw) return { kind: "none" };
 
-  const fileId = extractDriveFileId(raw);
+  let fileId = extractDriveFileId(raw);
+
+  /* A plain name, looked up in the connected folder.
+     ------------------------------------------------------------------
+     Tried before treating the value as a Drive id, because a long
+     single-word name — "chickensouvlakiplatter" — is indistinguishable from
+     a bare file id by shape alone, and inside a folder of photographs the
+     name is overwhelmingly the likelier reading. Anything containing a slash
+     or a query is a URL and is left to the patterns above. */
+  if (args.folderId && !/[/?]/.test(raw) && !/^https?:/i.test(raw)) {
+    try {
+      const found = await findInFolder(args.subject, args.folderId, raw);
+      if (found?.id) fileId = found.id;
+    } catch {
+      // The folder could not be searched. Fall through: a value that is also
+      // a valid file id still resolves, and a value that is not produces the
+      // ordinary "not a Drive link" message rather than a second error about
+      // a folder the person may not know exists.
+    }
+  }
 
   if (!fileId) {
     // Not a Drive reference. A plain https image URL is allowed through as-is
@@ -91,7 +121,9 @@ export async function resolveImage(args: {
     if (/^https:\/\/\S+$/i.test(raw)) return { kind: "external", url: raw };
     return {
       kind: "error",
-      message: "Not a Google Drive link or an https image address.",
+      message: args.folderId
+        ? "No image with that name is in the connected Google Drive folder, and it is not a Drive link or an https address."
+        : "Not a Google Drive link or an https image address.",
     };
   }
 
@@ -101,7 +133,7 @@ export async function resolveImage(args: {
   }
 
   try {
-    const meta = await driveFileMeta(args.userId, fileId);
+    const meta = await driveFileMeta(args.subject, fileId);
     if (meta.mimeType && !meta.mimeType.startsWith("image/")) {
       return { kind: "error", message: `That Drive file is a ${meta.mimeType}, not an image.` };
     }
@@ -109,7 +141,7 @@ export async function resolveImage(args: {
       return { kind: "error", message: "That Drive image is larger than 20MB." };
     }
 
-    const bytes = await downloadDriveFile(args.userId, fileId);
+    const bytes = await downloadDriveFile(args.subject, fileId);
 
     // Same treatment as an uploaded photo: EXIF orientation applied, the rest
     // (including GPS) dropped, resized, and converted to WebP.

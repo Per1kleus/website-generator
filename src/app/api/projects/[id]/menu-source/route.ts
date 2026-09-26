@@ -2,10 +2,12 @@ import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/server/auth";
 import { getProject, listAssets, saveVersion, updateProjectSite } from "@/server/projects";
 import { syncPlacements } from "@/server/images";
-import { connectionInfo, googleConfigured } from "@/server/google/oauth";
+import { googleConfigured } from "@/server/google/oauth";
+import { googleAccess, subjectForProject } from "@/server/google/credentials";
 import { REQUIRED_COLUMNS, SUGGESTED_CATEGORIES } from "@/server/menu/processor";
 import {
-  disconnectMenuSource, EMPTY_STATS, getMenuSource, recordSync, setMenuSource,
+  disconnectMenuSource, EMPTY_STATS, getMenuSource, recordSync, setMenuDriveFolder,
+  setMenuSource,
 } from "@/server/menu/source";
 import { syncMenu } from "@/server/menu/sync";
 import { refreshDeployment } from "@/server/deploy";
@@ -25,7 +27,9 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
   if (!project) return NextResponse.json({ error: "Not found." }, { status: 404 });
 
   return NextResponse.json({
-    google: { ...connectionInfo(user.id), configured: googleConfigured() },
+    /* Which Google connection this project reads with — the client's own when
+       they have connected one, otherwise the creator's. No credential. */
+    google: { ...googleAccess(id, user.id), configured: googleConfigured() },
     source: getMenuSource(id),
     requiredColumns: REQUIRED_COLUMNS,
     suggestedCategories: SUGGESTED_CATEGORIES,
@@ -47,11 +51,35 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     spreadsheetName?: string;
     sheetTitle?: string;
     refreshImages?: boolean;
+    folderId?: string;
+    folderName?: string;
   };
 
   if (body.action === "disconnect") {
     disconnectMenuSource(id);
     return NextResponse.json({ ok: true, source: null });
+  }
+
+  /* The folder the dish photographs are in.
+     Separate from choosing the spreadsheet because the two are chosen at
+     different times — and, when a client connects their own Google account,
+     by different people. Setting one must not blank the other. */
+  if (body.action === "configure-folder") {
+    if (!body.folderId) {
+      return NextResponse.json({ error: "Choose a folder." }, { status: 400 });
+    }
+    const source = setMenuDriveFolder(id, {
+      id: body.folderId,
+      name: body.folderName ?? "",
+    });
+    return NextResponse.json({ ok: true, source });
+  }
+
+  if (body.action === "disconnect-folder") {
+    // Only the reference is cleared. Nothing in the client's Drive is touched,
+    // and images already downloaded stay on the website.
+    const source = setMenuDriveFolder(id, { id: "", name: "" });
+    return NextResponse.json({ ok: true, source });
   }
 
   if (body.action === "configure") {
@@ -76,12 +104,15 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   }
 
   const result = await syncMenu({
-    userId: user.id,
+    subject: subjectForProject(id, user.id),
     projectId: id,
     site: project.site,
     spreadsheetId: source.spreadsheet_id,
     sheetTitle: source.sheet_title,
     refreshImages: Boolean(body.refreshImages),
+    // Empty unless a Drive folder is connected, in which case an `imageurl`
+    // cell may be a plain file name. Existing sheets are unaffected.
+    driveFolderId: source.drive_folder_id,
   });
 
   recordSync(id, {

@@ -78,6 +78,37 @@ const IMAGES = {
  * Drive link shapes so the resolver's extraction is covered.
  */
 const SHEETS = {
+  /* A second account's spreadsheet. Nothing in account A may ever see it: the
+     isolation tests rest on that. */
+  "sheet-beach": {
+    name: "Beach Bar Menu",
+    owner: "b",
+    tabs: {
+      Drinks: [
+        ["name", "price", "description", "chefs choice", "category", "imageurl"],
+        ["Mojito", 9, "White rum and mint", true, "Cocktails", ""],
+      ],
+    },
+  },
+  /* The same menu, written the way a restaurant owner actually writes it:
+     the imageurl column holds file names, not sharing URLs. Resolving these
+     is only possible through a connected Drive folder, which is the point. */
+  "sheet-folder": {
+    name: "Menu by file name",
+    owner: "a",
+    tabs: {
+      Menu: [
+        ["name", "price", "description", "chefs choice", "category", "imageurl"],
+        ["Greek Salad", 8.5, "Fresh tomatoes, feta and olives", true, "Starters", "greek-salad.png"],
+        // No extension, and the file on Drive is "Beef Burger.PNG" — the same
+        // name a person would type, in the case they would type it.
+        ["Beef Burger", 14, "Beef patty with fries", false, "Main Courses", "beef burger"],
+        ["Cheesecake", 7, "Homemade cheesecake", false, "Desserts", "cheesecake.png"],
+        // Not in the folder at all: reported, and the dish still shows.
+        ["Espresso", 2.5, "Single shot", false, "Coffee", "missing-photo.png"],
+      ],
+    },
+  },
   "sheet-menu": {
     name: "Restaurant Menu",
     tabs: {
@@ -117,6 +148,38 @@ const SHEETS = {
   },
 };
 
+/* Drive folders, and what is in them.
+   The folder exists so a menu sheet can say `moussaka.jpg` rather than a
+   sharing URL, which is the behaviour the resolver has to be tested against. */
+const FOLDERS = {
+  "folder-dishes": {
+    name: "Dish photographs",
+    owner: "a",
+    files: {
+      "greek-salad.png": "1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbsGREEKSAL",
+      "Beef Burger.PNG": "1CyjNWt1YSB6oGNeLwCeCakhnVVrqumctBURGERPAT",
+      "cheesecake.png": "1DzkOXu2ZTC7pHOfMxDfDblioWWsrvndCHEESECAKE",
+    },
+  },
+  "folder-beach": { name: "Beach photos", owner: "b", files: {} },
+};
+
+/**
+ * Two Google accounts, because one cannot demonstrate isolation.
+ *
+ * A test drives the consent redirect itself, so it can append `mock_account=b`
+ * to choose the second one — which is how "project A's credentials can never
+ * read project B's material" becomes something that is actually checked rather
+ * than reasoned about.
+ */
+const ACCOUNTS = {
+  a: { email: "chef@example.com", token: "mock-access", refresh: "mock-refresh" },
+  b: { email: "owner@beachbar.example", token: "mock-access-b", refresh: "mock-refresh-b" },
+};
+
+/** Authorisation codes, each remembering what it was granted and by whom. */
+const CODES = new Map();
+
 let issuedRefresh = 0;
 /** Everything consent has ever granted, as Google accumulates it. */
 const grantedScopes = new Set();
@@ -131,6 +194,10 @@ const server = createServer((req, res) => {
   };
   const auth = req.headers.authorization ?? "";
   const authed = auth.startsWith("Bearer mock-access");
+  // Which account this bearer token belongs to. Every content endpoint below
+  // answers only with that account's own material.
+  const who = auth.includes("mock-access-b") ? "b" : "a";
+  const owns = (record) => (record.owner ?? "a") === who;
 
   /* ------------------------------- OAuth -------------------------------- */
   if (url.pathname === "/o/oauth2/v2/auth") {
@@ -145,8 +212,18 @@ const server = createServer((req, res) => {
     // keeps what was granted before. Echoing the request rather than a fixed
     // string is what lets incremental consent be tested at all.
     const asked = (url.searchParams.get("scope") ?? "").split(" ").filter(Boolean);
-    for (const scope of asked) grantedScopes.add(scope);
-    res.writeHead(302, { Location: `${redirect}?code=mock-code&state=${encodeURIComponent(state ?? "")}` });
+    const incremental = url.searchParams.get("include_granted_scopes") === "true";
+    if (incremental) for (const scope of asked) grantedScopes.add(scope);
+
+    // A test may ask for the second account, and may ask for a permission to be
+    // refused so partial consent can be exercised.
+    const account = url.searchParams.get("mock_account") === "b" ? "b" : "a";
+    const refuse = (url.searchParams.get("mock_refuse") ?? "").split(",").filter(Boolean);
+    const granted = asked.filter((scope) => !refuse.some((part) => scope.includes(part)));
+
+    const code = account === "b" ? "mock-code-b" : "mock-code";
+    CODES.set(code, { account, incremental, granted });
+    res.writeHead(302, { Location: `${redirect}?code=${code}&state=${encodeURIComponent(state ?? "")}` });
     return res.end();
   }
 
@@ -157,9 +234,16 @@ const server = createServer((req, res) => {
       const form = new URLSearchParams(body);
       if (form.get("grant_type") === "refresh_token") {
         issuedRefresh += 1;
-        return send(200, { access_token: "mock-access-refreshed", expires_in: 3600 });
+        // The refreshed token stays the same account's token, so a refresh can
+        // never quietly move a project onto someone else's credentials.
+        const account = form.get("refresh_token") === ACCOUNTS.b.refresh ? "b" : "a";
+        return send(200, {
+          access_token: `${ACCOUNTS[account].token}-refreshed`,
+          expires_in: 3600,
+        });
       }
-      if (form.get("code") !== "mock-code") return send(400, { error: "invalid_grant" });
+      const issued = CODES.get(form.get("code") ?? "");
+      if (!issued) return send(400, { error: "invalid_grant" });
 
       // PKCE: when a challenge was presented, the verifier must hash to it.
       if (lastChallenge) {
@@ -175,18 +259,25 @@ const server = createServer((req, res) => {
           return send(400, { error: "invalid_grant", error_description: "PKCE mismatch" });
         }
       }
+      // A code is single use, as Google's are.
+      CODES.delete(form.get("code") ?? "");
+      const account = ACCOUNTS[issued.account];
       send(200, {
-        access_token: "mock-access",
-        refresh_token: "mock-refresh",
+        access_token: account.token,
+        refresh_token: account.refresh,
         expires_in: 3600,
-        scope: [...grantedScopes].join(" "),
+        /* Exactly what this consent granted. With include_granted_scopes the
+           account's whole accumulated set comes back, which is what makes
+           incremental consent testable; without it, only what was asked for
+           and approved — which is what a client connection link relies on. */
+        scope: (issued.incremental ? [...grantedScopes] : issued.granted).join(" "),
       });
     });
   }
 
   if (url.pathname === "/oauth2/v2/userinfo") {
     if (!authed) return send(401, { error: "unauthorized" });
-    return send(200, { email: "chef@example.com" });
+    return send(200, { email: ACCOUNTS[who].email });
   }
 
   if (!authed) return send(401, { error: { message: "Invalid Credentials" } });
@@ -195,7 +286,34 @@ const server = createServer((req, res) => {
   if (url.pathname === "/drive/v3/files" && req.method === "GET") {
     const q = url.searchParams.get("q") ?? "";
     const nameFilter = q.match(/name contains '([^']*)'/)?.[1]?.toLowerCase() ?? "";
+    const exactName = q.match(/name = '((?:[^'\\]|\\.)*)'/)?.[1]?.replace(/\\(.)/g, "$1") ?? "";
+    const parent = q.match(/'([^']+)' in parents/)?.[1] ?? "";
+
+    // Inside a folder: the images it holds, for this account only.
+    if (parent) {
+      const folder = FOLDERS[parent];
+      if (!folder || !owns(folder)) return send(200, { files: [] });
+      const files = Object.entries(folder.files)
+        .filter(([name]) => !exactName || name === exactName)
+        .map(([name, id]) => ({
+          id,
+          name,
+          mimeType: "image/png",
+          size: String(IMAGES[id]?.length ?? 0),
+        }));
+      return send(200, { files });
+    }
+
+    if (q.includes("application/vnd.google-apps.folder")) {
+      const files = Object.entries(FOLDERS)
+        .filter(([, v]) => owns(v))
+        .filter(([, v]) => !nameFilter || v.name.toLowerCase().includes(nameFilter))
+        .map(([id, v]) => ({ id, name: v.name, modifiedTime: "2026-09-09T10:00:00.000Z" }));
+      return send(200, { files });
+    }
+
     const files = Object.entries(SHEETS)
+      .filter(([, v]) => owns(v))
       .filter(([, v]) => !nameFilter || v.name.toLowerCase().includes(nameFilter))
       .map(([id, v]) => ({ id, name: v.name, modifiedTime: "2026-09-09T10:00:00.000Z" }));
     return send(200, { files });
@@ -221,6 +339,9 @@ const server = createServer((req, res) => {
   const values = url.pathname.match(/^\/v4\/spreadsheets\/([^/]+)\/values\/(.+)$/);
   if (values) {
     const book = SHEETS[decodeURIComponent(values[1])];
+    // Another account's spreadsheet is not "not found" to Google — it is
+    // forbidden — and the difference is what the application has to report.
+    if (book && !owns(book)) return send(403, { error: { message: "The caller does not have permission" } });
     if (!book) return send(404, { error: { message: "Requested entity was not found." } });
     const title = decodeURIComponent(values[2]).replace(/^'|'$/g, "").replace(/''/g, "'");
     const rows = book.tabs[title];
@@ -231,6 +352,7 @@ const server = createServer((req, res) => {
   const book = url.pathname.match(/^\/v4\/spreadsheets\/([^/]+)$/);
   if (book) {
     const found = SHEETS[decodeURIComponent(book[1])];
+    if (found && !owns(found)) return send(403, { error: { message: "The caller does not have permission" } });
     if (!found) return send(404, { error: { message: "Requested entity was not found." } });
     return send(200, {
       properties: { title: found.name },
@@ -244,6 +366,16 @@ const server = createServer((req, res) => {
 
   // The properties this account owns, as the Admin API lists them.
   if (url.pathname === "/v1beta/accountSummaries") {
+    if (who === "b") {
+      return send(200, {
+        accountSummaries: [
+          {
+            displayName: "Beach Bar",
+            propertySummaries: [{ property: "properties/333", displayName: "Beach Bar Web" }],
+          },
+        ],
+      });
+    }
     return send(200, {
       accountSummaries: [
         {
@@ -262,8 +394,13 @@ const server = createServer((req, res) => {
   const streams = url.pathname.match(/^\/v1beta\/properties\/([^/]+)\/dataStreams$/);
   if (streams) {
     if (streams[1] === "222") return send(200, { dataStreams: [] });
+    // A property belonging to the other account is refused, not answered.
+    const ownerOf = streams[1] === "333" ? "b" : "a";
+    if (ownerOf !== who) {
+      return send(403, { error: { message: "User does not have sufficient permissions" } });
+    }
     return send(200, {
-      dataStreams: [{ webStreamData: { measurementId: "G-MOCK12345" } }],
+      dataStreams: [{ webStreamData: { measurementId: streams[1] === "333" ? "G-BEACH999" : "G-MOCK12345" } }],
     });
   }
 

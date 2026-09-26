@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/server/auth";
 import { getProject, saveVersion, updateProjectSite } from "@/server/projects";
-import { connectionStatus } from "@/server/google/oauth";
+import { googleAccess, subjectForProject } from "@/server/google/credentials";
 import {
   analyticsReport, clearProperty, getProperty, GoogleError, isRangeId,
   listAnalyticsProperties, listSearchConsoleSites, measurementIdFor, searchConsoleReport,
@@ -20,6 +20,12 @@ import { googleApiFailure } from "@/lib/google-errors";
  * the server-side client and never travels outward; the single Google value
  * that does reach a browser — and then only the generated website — is the
  * public measurement id.
+ *
+ * Whose credentials get used is decided by `subjectForProject`: the client's
+ * own connection when this project has one, and the creator's otherwise.
+ * Search Console is the exception and always uses the creator's account — a
+ * client connection deliberately never asks for it, because no implemented
+ * feature needs a business owner's whole Search Console.
  */
 
 type Service = "analytics" | "searchConsole";
@@ -48,10 +54,19 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
   const url = new URL(req.url);
   const want = url.searchParams.get("report");
   const rangeParam = url.searchParams.get("range") ?? "28d";
-  const google = connectionStatus(user.id);
+  const access = googleAccess(id, user.id);
+  const subject = subjectForProject(id, user.id);
 
   const state = {
-    google: { connected: google.connected, analytics: google.analytics, searchConsole: google.searchConsole },
+    google: {
+      connected: access.connected,
+      analytics: access.analytics,
+      searchConsole: access.searchConsole,
+      /* Which connection is answering, so the screen can say "your client's
+         Google account" rather than implying the creator's own. Never a token. */
+      source: access.source,
+      email: access.email,
+    },
     analytics: getProperty(id, "analytics"),
     searchConsole: getProperty(id, "searchConsole"),
   };
@@ -70,14 +85,14 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
   try {
     // Lists of what the account owns, for choosing a property.
     if (want === "analyticsProperties") {
-      if (!google.analytics) {
+      if (!access.analytics) {
         return NextResponse.json({ error: "Analytics access has not been granted." }, { status: 403 });
       }
-      return NextResponse.json({ properties: await listAnalyticsProperties(user.id) });
+      return NextResponse.json({ properties: await listAnalyticsProperties(subject) });
     }
 
     if (want === "searchConsoleSites") {
-      if (!google.searchConsole) {
+      if (!access.searchConsole) {
         return NextResponse.json(
           { error: "Search Console access has not been granted." },
           { status: 403 },
@@ -92,7 +107,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
         return NextResponse.json({ error: "No Analytics property is connected." }, { status: 400 });
       }
       return NextResponse.json({
-        report: await analyticsReport(user.id, property.property_id, range),
+        report: await analyticsReport(subject, property.property_id, range),
         property,
       });
     }
@@ -174,7 +189,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     if (service === "analytics") {
       // The public measurement id comes from Google, not from the creator
       // typing one: a mistyped id silently sends a client's traffic nowhere.
-      const measurementId = await measurementIdFor(user.id, body.propertyId);
+      const measurementId = await measurementIdFor(subjectForProject(id, user.id), body.propertyId);
       if (!measurementId) {
         return NextResponse.json(
           {

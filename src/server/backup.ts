@@ -217,6 +217,8 @@ export async function buildBackup(
             spreadsheet_id: menu.spreadsheet_id,
             spreadsheet_name: menu.spreadsheet_name,
             sheet_title: menu.sheet_title,
+            drive_folder_id: menu.drive_folder_id,
+            drive_folder_name: menu.drive_folder_name,
             status: menu.status,
             last_sync_at: menu.last_sync_at,
           }

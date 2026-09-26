@@ -197,6 +197,104 @@ function migrate(handle: Database.Database) {
     CREATE INDEX IF NOT EXISTS client_responses_preview
       ON client_responses(preview_id, created_at DESC);
 
+    /* The client's own Google account, authorising exactly one project.
+       ------------------------------------------------------------------
+       Same shape and same rules as google_accounts — tokens encrypted at
+       rest by server/crypto.ts, read only inside server modules, never in a
+       response, a backup or a generated website. What differs is the subject:
+       this row belongs to a project, not to a creator, so one client's
+       credentials can never be used for another client's project.
+
+       A creator's own connection stays in google_accounts and keeps working
+       untouched; this table is consulted first and falls back to it. */
+    CREATE TABLE IF NOT EXISTS project_google_accounts (
+      project_id    TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+      email         TEXT NOT NULL DEFAULT '',
+      access_token  TEXT NOT NULL,
+      refresh_token TEXT NOT NULL DEFAULT '',
+      expires_at    INTEGER NOT NULL DEFAULT 0,
+      scope         TEXT NOT NULL DEFAULT '',
+      /* 'client' when the business owner connected it through a link,
+         'owner' when the creator connected it on the project's behalf. */
+      connected_by  TEXT NOT NULL DEFAULT 'client',
+      /* Set when the connection is withdrawn here. The row is deleted, so
+         this only ever holds a value while a revocation is being recorded. */
+      revoked_at    INTEGER NOT NULL DEFAULT 0,
+      created_at    INTEGER NOT NULL,
+      updated_at    INTEGER NOT NULL
+    );
+
+    /* A link a creator sends a client so the client can connect their own
+       Google account. The id IS the capability, exactly as for a client
+       preview: 32 bytes of crypto-strong randomness, generated independently
+       of the project, never derived from an id, an email or a counter. The
+       project it authorises is read from this row and never from the browser. */
+    CREATE TABLE IF NOT EXISTS connect_links (
+      id          TEXT PRIMARY KEY,
+      project_id  TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      /* Which services this link may ask for, decided from the project's kind
+         when the link is made. The consent screen can never ask for more. */
+      services    TEXT NOT NULL DEFAULT '[]',
+      label       TEXT NOT NULL DEFAULT '',
+      /* 0 means no expiry. A link is revocable either way. */
+      expires_at  INTEGER NOT NULL DEFAULT 0,
+      revoked     INTEGER NOT NULL DEFAULT 0,
+      used_at     INTEGER NOT NULL DEFAULT 0,
+      created_at  INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS connect_links_project
+      ON connect_links(project_id, created_at DESC);
+
+    /* One authorisation attempt. The state is held here rather than in a
+       cookie because the client's browser may not be the one that started the
+       flow, and because it has to bind the callback to a link — Google returns
+       nothing else this side can trust. Single use, and short-lived. */
+    CREATE TABLE IF NOT EXISTS connect_states (
+      state      TEXT PRIMARY KEY,
+      link_id    TEXT NOT NULL REFERENCES connect_links(id) ON DELETE CASCADE,
+      /* Exactly the scopes that were asked for, so the callback can say which
+         of them the client actually approved. */
+      scopes     TEXT NOT NULL DEFAULT '',
+      expires_at INTEGER NOT NULL,
+      used_at    INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL
+    );
+
+    /* What each service is doing for one project, tracked per service so a
+       menu project can be connected for Analytics and failing for Drive and
+       say so. Only state lives here: the resource that was chosen stays in
+       google_properties and menu_sources, which already own it. */
+    CREATE TABLE IF NOT EXISTS project_google_services (
+      project_id  TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      service     TEXT NOT NULL,
+      status      TEXT NOT NULL DEFAULT 'not_connected',
+      /* When the chosen resource was last proved readable with these
+         credentials. OAuth succeeding is not the same thing. */
+      verified_at INTEGER NOT NULL DEFAULT 0,
+      error       TEXT NOT NULL DEFAULT '',
+      updated_at  INTEGER NOT NULL,
+      PRIMARY KEY (project_id, service)
+    );
+
+    /* An audit trail for connections. Deliberately without credentials: no
+       access token, no refresh token, no authorisation code, no client
+       secret ever reaches this table — only what happened and when.
+
+       The link token is not here either, although it would be convenient:
+       a capability belongs in exactly one place, and an audit trail is read,
+       exported and pasted into support conversations far more often than a
+       credential store should be. */
+    CREATE TABLE IF NOT EXISTS connect_events (
+      id         TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      event      TEXT NOT NULL,
+      service    TEXT NOT NULL DEFAULT '',
+      detail     TEXT NOT NULL DEFAULT '',
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS connect_events_project
+      ON connect_events(project_id, created_at DESC);
+
     /* A Google property connected to one project — an Analytics data stream
        or a Search Console site. Credentials are never here: this names what
        to ask about, and google_accounts holds the encrypted token. */
@@ -278,6 +376,17 @@ const COLUMNS: [table: string, column: string, ddl: string][] = [
   /* Which saved version went live. The generator stays the source of truth
      for version history; this only records which of its versions is public. */
   ["deployments", "version_id", "TEXT NOT NULL DEFAULT ''"],
+
+  /* The Drive folder a menu's photographs live in.
+     ------------------------------------------------------------------
+     Optional, and empty for every existing menu: a sheet that pastes full
+     Drive links keeps working exactly as before. When a folder is set, an
+     `imageurl` cell may instead be a plain file name, which is what a
+     restaurant owner uploading photographs from a phone actually produces.
+     The images are still fetched server-side and served from here; a
+     browser never reaches into the folder. */
+  ["menu_sources", "drive_folder_id", "TEXT NOT NULL DEFAULT ''"],
+  ["menu_sources", "drive_folder_name", "TEXT NOT NULL DEFAULT ''"],
 ];
 
 function addColumns(handle: Database.Database) {

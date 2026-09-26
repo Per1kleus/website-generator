@@ -30,7 +30,8 @@
     "test:preview": "node --import tsx --conditions react-server scripts/preview-qa.mjs",
     "test:studio": "node --import tsx --conditions react-server scripts/studio-qa.mjs",
     "test:github": "node --import tsx --conditions react-server scripts/github-qa.mjs",
-    "test:backup": "node --import tsx --conditions react-server scripts/backup-qa.mjs"
+    "test:backup": "node --import tsx --conditions react-server scripts/backup-qa.mjs",
+    "test:connect": "node --import tsx --conditions react-server scripts/connect-qa.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.21.0",

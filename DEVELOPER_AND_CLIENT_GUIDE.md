@@ -41,7 +41,8 @@ than describing it aspirationally.
 5. [Your domain name](#b5-your-domain-name)
 6. [After it goes live](#b6-after-it-goes-live)
 7. [Analytics and Google](#b7-analytics-and-google)
-8. [If something does not work](#b8-if-something-does-not-work)
+8. [Connecting your own Google account](#b8-connecting-your-own-google-account)
+9. [If something does not work](#b9-if-something-does-not-work)
 
 **Closing**
 
@@ -350,7 +351,21 @@ research stages naming the business; without one the first stage reads
 
 One OAuth connection serves three features. There is no second Google login.
 
+There are **two ways** a Google account gets connected, and they use the same
+OAuth application, the same token encryption and the same API client:
+
+| | Connected by | Stored against | Used for |
+| --- | --- | --- | --- |
+| **Your own connection** | You, in Account → Google | Your user account | Any project that has no connection of its own |
+| **A client connection link** | The client, from a link you send | **One project** | That project only |
+
+A project prefers its own connection and falls back to yours. That is what
+makes the feature additive: an installation that upgrades keeps working with no
+reconnection anywhere.
+
 ### A4.1 Scopes
+
+Your own connection:
 
 | Scope | Feature | When requested |
 | --- | --- | --- |
@@ -362,6 +377,24 @@ One OAuth connection serves three features. There is no second Google login.
 Optional scopes use **incremental consent** (`include_granted_scopes=true`):
 granting Analytics keeps the Sheets and Drive access already granted.
 
+A **client connection link** asks for less, and asks for it exactly:
+
+| Project kind | Scopes requested | Scopes NOT requested |
+| --- | --- | --- |
+| Full business website | `analytics.readonly` | Everything else, including anything touching Sheets or Drive |
+| Digital menu | `analytics.readonly`, `spreadsheets.readonly`, `drive.readonly` | `webmasters.readonly` |
+
+The list comes from the project's kind at the moment the link is created, so a
+brochure website's link is **incapable** of asking for Drive — the scopes are
+not in the request, not merely hidden from the screen. Incremental consent is
+switched **off** for these links (`include_granted_scopes=false`), so a
+permission the same Google account once granted for a different project is not
+quietly re-granted here.
+
+Search Console is deliberately never in a client link. Nothing implemented
+needs it from the business owner, and the account that has a site verified in
+Search Console is normally the developer's.
+
 Everything is read-only. The application never writes to anyone's Drive,
 Sheets, Analytics or Search Console.
 
@@ -371,22 +404,34 @@ Sheets, Analytics or Search Console.
    - **Web application** for a hosted deployment,
    - **Desktop app** for the packaged desktop build (PKCE, no secret shipped).
 2. Add the redirect URI: `https://<your-origin>/api/google/callback`
+   — **one URI, for both flows.** Client connection links come back through the
+   same callback and are told apart by their state, so there is nothing extra
+   to register when you start using them.
 3. Enable the APIs you intend to use: Sheets, Drive, Google Analytics Data,
    Google Analytics Admin, Search Console.
-4. Add the four scopes above to the consent screen.
+4. Add the four scopes above to the consent screen. A client link only ever
+   uses three of them, all `.readonly`, but they must be registered once here.
 5. Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`.
 6. Restart, and confirm `/api/health` reports `googleConfigured: true`.
 
 ### A4.3 What the client does
 
-The **client** does almost nothing here. Google is connected by whoever
-operates the application, using an account that has access to the client's
-spreadsheet / Analytics property / Search Console property. If the client owns
-those, they must share them with that account, or connect their own.
+You have a choice, per project.
+
+**Either** you connect a Google account that already has access to the client's
+spreadsheet, Analytics property and Search Console property — in which case the
+client has to share those with you.
+
+**Or** you send the client a connection link (A4.7 below) and they connect
+their own Google account to that one project. Nothing is shared with you: you
+never see their password, and you never hold their credentials. This is the
+better option whenever the material is genuinely theirs, which for Analytics
+and a menu spreadsheet it usually is.
 
 For Search Console specifically, **domain ownership verification happens in
 Search Console**, by whoever controls the domain. This application reads the
-verification state; it cannot grant it.
+verification state; it cannot grant it. Search Console always uses *your* own
+connection, never a client's.
 
 ### A4.4 Connecting, reconnecting, disconnecting
 
@@ -428,6 +473,165 @@ verification state; it cannot grant it.
 > you handled visitor consent. It does not obtain consent, and it makes no
 > claim that your use of Analytics is lawful. That is for you and your client's
 > legal adviser.
+
+### A4.7 Client connection links
+
+A link lets a client connect **their own** Google account to **one** project,
+without ever giving you a password or a credential.
+
+**Where:** project → **Client Google** → *Create a connection link*.
+
+**What the link looks like:**
+
+```
+https://<your-origin>/connect/qYN-l3R6Bj8UGhw7EihWPTYnA0LJ38K2Y5Vqbf1C_PE
+```
+
+That last part is the whole authorisation: 32 bytes of cryptographically secure
+randomness, 43 characters of base64url. It is generated independently of
+everything it points at, so it contains no project id, no database id, no user
+id, no email address, no token and nothing derived from a counter or a
+timestamp. Two links made a second apart share no prefix.
+
+**What it authorises:** exactly one project, read from the link's own row on the
+server. No request in the flow carries a project identifier, so there is nothing
+a browser could change to reach a different project. A link asking for Analytics
+cannot be persuaded to list spreadsheets; that service does not exist as far as
+that link is concerned.
+
+**How long it lasts:** 14 days by default, and you can withdraw it at any
+moment. Withdrawing also stops a sign-in that is already in progress — a client
+who opened the consent screen before you withdrew the link connects nothing.
+
+**What a wrong token gets:** `404`, with one sentence — *"This link is not
+valid. Ask for a new one."* An unknown token, a withdrawn link, an expired link
+and a link whose project was deleted are answered identically, so probing the
+space reveals nothing, not even whether a token was ever real.
+
+### A4.8 Sending one
+
+1. Open the project → **Client Google**.
+2. Optionally write a note to remember it by ("Sent to Maria, 12 March"). The
+   note is for you; the client never sees it.
+3. Press **Create a connection link**.
+4. **Copy link**, and send it to your client the way you normally talk to them.
+5. Watch the same screen. It tells you when the link was opened, what the client
+   chose, and whether each choice has actually been read successfully.
+
+> ⚠ **Treat the link like a key.** Anyone holding it can connect *their* Google
+> account to that project. They cannot read anything already connected, change
+> the website, or reach any other project — but they could point the project at
+> their own Analytics property. Send it directly to the client, not into a
+> public channel, and withdraw it once they have finished.
+
+### A4.9 What the client sees
+
+One page, outside your builder entirely: their business name, a plain list of
+the permissions being asked for and why, and a **Continue with Google** button.
+They sign in on Google's own pages. Then they choose:
+
+- the GA4 property to use, and
+- for a digital menu, the spreadsheet, the sheet inside it, and the Drive folder
+  their dish photographs are in.
+
+Every choice is checked immediately by actually reading the thing that was
+chosen, with the credentials that were just granted.
+
+Part B of this guide is written for them. You can send them the B8 section as-is.
+
+### A4.10 "Connected" means it works
+
+This distinction matters more than anything else in this section, because
+getting it wrong is how a client's menu ends up empty on opening night.
+
+**Consent succeeding is not a working connection.** A client can press Allow on
+an account that has no GA4 property, or that cannot open the spreadsheet you
+chose, or that never had the photograph folder shared with it.
+
+So the application verifies. After consent, and after every choice, it performs
+the real read the feature will later depend on:
+
+| Service | What is actually done to prove it |
+| --- | --- |
+| Analytics | Reads the property's **web data stream**, which is also where the public measurement id comes from |
+| Sheets | Lists the sheets in the file, confirms the chosen one exists, then reads its values |
+| Drive | Lists the images inside the chosen folder |
+
+Statuses, per service, and rolled up for the project:
+
+| Status | Shown as | Meaning |
+| --- | --- | --- |
+| `not_connected` | Not connected | No account connected, or this permission was declined |
+| `connecting` | Not checked yet | Consent happened; nothing has been proved |
+| `connected` | Working | The chosen resource was read successfully, and when |
+| `partially_connected` | Partly working | Some services work, others do not (project-wide only) |
+| `expired` | Expired | Google returned 401: the grant is gone or unusable |
+| `revoked` | Withdrawn | The connection was withdrawn here |
+| `error` | Not working | Something specific and reportable went wrong |
+
+Press **Check it works** on the project's Client Google screen whenever you want
+this re-established. Do it before handover, always.
+
+### A4.11 Withdrawing, and what survives
+
+**Withdraw a link** — *Withdraw* on that link. The link stops working. An
+existing connection made through it is unaffected.
+
+**Disconnect the credentials** — *Disconnect* on the Client Google screen. This
+deletes the project's stored Google tokens and nothing else:
+
+| Survives disconnecting | Why |
+| --- | --- |
+| The website, exactly as it is | Disconnecting is withdrawing permission, not deleting work |
+| Menu items and photographs already synced | They are in the website document and in local storage |
+| Every saved version | Version history is never touched by an integration |
+| The published site and its domain | Publishing does not depend on a Google connection |
+| The chosen Analytics property and measurement id | So the site keeps reporting into the same property |
+| Everything in the client's Google account | Nothing of theirs is ever modified or deleted |
+
+What stops is future **reading**. A menu sync or an insights report falls back to
+your own connection, and says plainly if that one cannot see the client's
+material either.
+
+The client can also withdraw from their side, at
+`myaccount.google.com` → Security → Third-party access. Nothing here can prevent
+that, and nothing here should. The next read then fails with `expired`.
+
+### A4.12 Client connection troubleshooting
+
+| Symptom | Cause | Fix |
+| --- | --- | --- |
+| Client says the link does not work | Withdrawn, expired, or a truncated copy-paste | Create a new link and send the whole URL |
+| "Some of the permissions were not approved" | A permission was unticked on the consent screen | Ask them to open the link again and leave all of them ticked |
+| Analytics says "no website data stream yet" | The GA4 property has no Web stream | They add a Web data stream in Google Analytics, then choose the property again |
+| Analytics says "cannot read that property" | The property belongs to a different Google account | They sign in with the account that owns it |
+| Sheets says "does not have access to that file" | You chose a spreadsheet their account cannot open | Either they choose one of their own, or you share yours with them |
+| "no sheet called …" | The tab was renamed or deleted | Choose the sheet again |
+| Drive folder "readable but has no images in it yet" | Correct folder, no photographs yet | Nothing to fix; it will work once they upload |
+| A dish has no photo, and the finding mentions the folder | The `imageurl` name does not match any file in the folder | Match the file name, or paste a Drive link for that row |
+| Everything reads "Not checked yet" | Nothing has verified since consent | Press **Check it works** |
+| "Your Google connection has expired" | 401 from Google; withdrawn at Google's end or unusable | Send a new link and ask them to connect again |
+| The screen shows your own email, not the client's | The project has no connection of its own | Send a link; until then it uses your connection |
+
+### A4.13 Where the credentials are, and are not
+
+For audit purposes, plainly:
+
+- A client's tokens are encrypted with AES-256-GCM (`server/crypto.ts`) in
+  `project_google_accounts`, keyed by project id. They are read only inside
+  server modules, decrypted per request, used and dropped.
+- They are **never** returned to a browser, put into HTML, put into a URL, put
+  into `localStorage`, reachable from client-side JavaScript, written to a log,
+  written into a backup, or included in a generated website. The connection
+  suite checks the produced HTTP responses, the rendered website, the backup
+  archive and the server's own log output for exactly this.
+- The audit trail (`connect_events`) records what happened and when. It holds no
+  access token, no refresh token, no authorisation code, no client secret — and
+  no link token either, because a capability belongs in one place and an audit
+  trail is read and pasted around far more often than a credential store.
+- The public menu is still static HTML. Photographs from a client's Drive folder
+  are fetched server-side, converted, and served from your own site; a visitor's
+  browser never touches private Drive.
 
 ---
 
@@ -792,7 +996,25 @@ identity and its translations survive.
 - A **Drive link** is downloaded once and cached as a project asset; a
   re-sync reuses the cache unless Sync Now forces a re-download.
 - A **plain https URL** is passed through as-is.
+- A **plain file name** — `moussaka.jpg`, or even just `moussaka` — works when a
+  photograph folder is connected (below). The name is matched exactly first, then
+  ignoring case and file extension, so a sheet saying `Beef Burger` finds
+  `beef burger.PNG`.
 - Non-image Drive files, and files over 20 MB, are rejected with a reason.
+- A name that matches nothing in the folder is **reported per row**; the dish
+  still appears, without a photograph. Nothing is invented.
+
+**Connecting the photograph folder.** Project → Menu data → *Choose a folder*,
+or the client picks it themselves through a connection link (A4.7). It is
+optional: a sheet that pastes full Drive links keeps working exactly as before,
+and every existing menu is unaffected.
+
+The folder exists because pasting thirty Drive sharing URLs correctly is the step
+where a real restaurant owner gives up, and typing a file name is not.
+
+> The folder is never opened by a visitor's browser. Photographs are fetched
+> server-side, stripped of EXIF, resized, converted to WebP and served from your
+> own site. The public menu remains static HTML that never calls Google.
 
 ### A8.3 Synchronising
 
@@ -945,6 +1167,7 @@ npm run test:setup          # 40
 npm run test:desktop        # 55
 npm run test:github         # 175
 npm run test:backup         # 95
+npm run test:connect        # 77
 
 # Need the app running on port 3100
 npm run test:preview        # 60
@@ -952,7 +1175,20 @@ npm run test:studio         # 230
 npm run test:mobile         # 223
 ```
 
-CI runs all of them on every push.
+CI runs all of them on every push. **1,485 checks in total.**
+
+`test:connect` runs against `scripts/mock-google.mjs`, which implements the exact
+OAuth, Sheets, Drive, Analytics and Search Console endpoints, response shapes and
+status codes the application uses — including PKCE, refresh, partial consent, and
+**two separate Google accounts**, so "one client's credentials cannot reach
+another client's material" is checked rather than argued.
+
+What a mock cannot cover is Google's own consent screen and Google's verification
+requirements for the `analytics.readonly`, `spreadsheets.readonly` and
+`drive.readonly` scopes. Do one real run before your first client handover:
+create a link on a real deployment, open it in a browser signed in to a Google
+account that is not yours, complete the consent screen, and confirm the project's
+Client Google screen reports **Working** for each service.
 
 ### A10.2 Pre-delivery checklist
 
@@ -1043,6 +1279,15 @@ Complete **every** line before handing a website to a client.
 - [ ] No Analytics code if Analytics is not configured
 - [ ] Search Console property verified **by Google**
 - [ ] Consent responsibility discussed and recorded
+
+**Client Google connection** *(where applicable)*
+
+- [ ] The Client Google screen names the **client's** email, not yours
+- [ ] **Check it works** pressed, and every service reads **Working**
+- [ ] For a digital menu: spreadsheet, sheet and photograph folder all Working
+- [ ] A menu sync run since the client connected, and it found the photographs
+- [ ] The connection link **withdrawn** now that it has been used
+- [ ] No Analytics property of your own left selected on the client's project
 
 **Handoff**
 
@@ -1379,8 +1624,15 @@ Useful for "are people finding me when they search for my kind of business?"
 
 ### Setting them up
 
-Your developer connects these. You may need to give them access to your Google
-account for these services, or create the accounts with them.
+There are two ways, and you can ask for whichever you prefer.
+
+**Your developer connects them.** You give them access to your Analytics
+property (or create it together), and they set it up from their side.
+
+**You connect your own Google account.** Your developer sends you one link, you
+sign in to Google yourself, and you choose your own property. Nothing is shared
+with them, and you are never asked for your password. This is usually the better
+option, and it is described in full in [B8](#b8-connecting-your-own-google-account).
 
 ### ⚠ About consent and the law
 
@@ -1399,7 +1651,124 @@ neither should claim to.
 
 ---
 
-## B8. If something does not work
+## B8. Connecting your own Google account
+
+Sometimes your developer will send you a second kind of link — not to look at
+your website, but to connect **your own Google account** to it.
+
+### Why you would do this
+
+So that the things that are yours stay yours.
+
+- Your visitor numbers are in **your** Google Analytics.
+- If you have a menu, it is in **your** spreadsheet.
+- Your dish photographs are in **your** Google Drive.
+
+Connecting your own account means your website reads those directly. You do not
+have to hand anything over, and you do not have to give anyone access to your
+whole Google account.
+
+### What you will never be asked for
+
+**Your Google password.** Not by your developer, not on this page, not anywhere
+in this process.
+
+You sign in on Google's own website, exactly as you do when you check your
+email. Your password goes to Google and to nobody else. Your developer never
+sees it, and neither does the website builder.
+
+> ⚠ **If anyone ever asks you to type your Google password into a page that is
+> not Google's own, stop.** That is true here and it is true everywhere. The
+> page you sign in on should say `accounts.google.com` in the address bar.
+
+### What you are being asked for
+
+You will see the exact list on the page, before you agree to anything. It is
+short, and everything on it is **read-only** — nothing in your Google account
+can be changed, added or deleted by your website.
+
+For an ordinary website:
+
+| Permission | What it is for |
+| --- | --- |
+| Google Analytics | So your visitor numbers can be shown to you |
+
+For a digital menu, two more:
+
+| Permission | What it is for |
+| --- | --- |
+| Your menu spreadsheet | So the menu on your website comes from the spreadsheet you already keep it in |
+| Your menu photographs | So the dish photographs in your Drive folder can appear on the menu |
+
+That is the whole list. Your email, your documents, your photos outside that one
+folder, your contacts, your calendar — none of that is asked for and none of it
+can be reached.
+
+### Step by step
+
+1. **Open the link** your developer sent you. You do not need an account or a
+   password for this website builder, and you will not be asked to create one.
+2. **Read the list of permissions.** If anything on it surprises you, stop and
+   ask your developer before continuing.
+3. Press **Continue with Google**.
+4. **Sign in to Google** if you are not already, and choose the right account —
+   the one your Analytics, spreadsheet and photographs are actually in. This is
+   the most common mistake: people have two Google accounts and pick the wrong
+   one.
+5. On Google's permission screen, **leave everything ticked** and continue. If
+   you untick something, the part of your website that needs it will not work,
+   and the page will tell you so.
+6. You come back to a page listing what to choose. For each item, press
+   **Choose** and pick yours:
+   - **Google Analytics** — pick the property for this business.
+   - **Your menu spreadsheet** — pick the file, then the sheet inside it.
+   - **Your menu photographs** — pick the folder your dish photos are in.
+7. Each one turns to **Connected** once your website has actually read it. If
+   something says **Needs attention**, the page explains what is wrong in plain
+   words.
+8. When everything says Connected, you are finished. **Close the page.**
+
+### If something goes wrong
+
+| What you see | What it means | What to do |
+| --- | --- | --- |
+| "This link is not valid" | The link has expired or been withdrawn | Ask your developer for a new one |
+| "Some of the permissions were not approved" | Something was unticked on Google's screen | Open the link again and leave them all ticked |
+| "no website data stream yet" | That Analytics property has never had a website added to it | In Google Analytics, add a Web data stream to it, then choose it again |
+| "cannot read that Analytics property" | You signed in with a different Google account | Sign out of Google and start again with the right account |
+| "does not have access to that file" | The spreadsheet belongs to someone else | Pick one of your own, or ask whoever owns it to share it with you |
+| "The folder is readable but has no images in it yet" | Right folder, no photographs in it | Nothing is wrong — upload your photographs and it will work |
+| Nothing loads at all | The link was cut short when it was copied | Ask for it again, and open the whole address |
+
+### Your rights over this
+
+**You can take it back at any time.** Go to
+[myaccount.google.com](https://myaccount.google.com) → **Security** →
+**Your connections to third-party apps & services**, find the website builder,
+and remove it. You do not need anyone's permission and you do not need to tell
+anybody first.
+
+**Your website keeps working if you do.** The website itself, the menu that was
+already brought across, the photographs already on the site and everything that
+has been published all stay exactly as they are. What stops is only the reading
+of anything new — so your developer will not be able to update the menu from
+your spreadsheet until you connect again.
+
+**Nothing of yours is ever deleted.** Not your spreadsheet, not your folder, not
+your photographs, not your Analytics data. The connection only ever reads.
+
+### Treat the link like a key
+
+The link is private and unguessable. Anyone who has it could connect *their*
+Google account to your website instead of yours, so:
+
+- do not post it publicly or in a group chat,
+- do not forward it to anyone who is not helping you set this up,
+- tell your developer once you have finished, so they can withdraw it.
+
+---
+
+## B9. If something does not work
 
 Work down the "What I check" column first. Most problems are on that list.
 
@@ -1471,6 +1840,15 @@ Use this as a sign-off sheet, once per delivered website.
 - [ ] Search Console verified by Google, not assumed
 - [ ] Consent responsibility explicitly discussed and recorded in writing
 
+**Client Google connection** *(if applicable)*
+
+- [ ] The project's Client Google screen names the **client's** email
+- [ ] **Check it works** pressed; every service the project needs reads **Working**
+- [ ] Digital menu: spreadsheet, sheet and photograph folder all Working
+- [ ] A menu sync run since they connected, and the photographs were found
+- [ ] The connection link **withdrawn** now that it has been used
+- [ ] No Analytics property of your own left selected on a client's project
+
 **Handoff**
 
 - [ ] Backup exported and stored **off this machine**
@@ -1478,6 +1856,7 @@ Use this as a sign-off sheet, once per delivered website.
 - [ ] Client preview link sent
 - [ ] Approval received against the **current** version
 - [ ] Client told: final URL, how to request changes, how menu updates work
+- [ ] Client told how to withdraw their own Google connection, if they made one
 - [ ] Domain remains in the **client's** name and account
 
 ---
@@ -1514,6 +1893,16 @@ Use this as a sign-off sheet, once per delivered website.
 - [ ] I have the registrar login, and I keep it
 - [ ] I added the DNS records exactly as sent
 - [ ] `https://mydomain` opens my website with a padlock
+
+**If I connected my own Google account**
+
+- [ ] I was never asked for my Google password by anyone
+- [ ] I signed in on Google's own page (`accounts.google.com` in the address bar)
+- [ ] I chose the Google account my Analytics and spreadsheet are actually in
+- [ ] Every item on the page says **Connected**
+- [ ] I told my developer I had finished, so they could withdraw the link
+- [ ] I know I can remove this at any time at
+      [myaccount.google.com](https://myaccount.google.com) → Security
 
 **After it is live**
 
@@ -1552,6 +1941,13 @@ written. What follows is what that audit found, including the gaps.
 | Backup contents, exclusions, restore semantics | `src/lib/backup-format.ts`, `src/server/backup.ts`, `backup-restore.ts` |
 | Client preview semantics | `src/server/client-preview.ts`, `src/server/projects.ts` |
 | Analytics and Search Console behaviour | `src/server/google/insights.ts` |
+| Client connection link: token, scoping, revocation, expiry | `src/server/connect/links.ts` |
+| Client connection scopes per project kind | `SERVICE_SCOPES` and `servicesForKind` in `src/server/google/subject.ts` |
+| Which credentials a project uses | `src/server/google/credentials.ts` |
+| Consent start and completion, shared callback | `src/server/connect/flow.ts`, `src/app/api/google/callback/route.ts` |
+| Per-service verification and status roll-up | `src/server/connect/verify.ts` |
+| What the client's page shows and never shows | `src/app/connect/[token]/page.tsx`, `src/components/ClientConnectScreen.tsx` |
+| Drive folder file-name resolution | `findInFolder` in `src/server/google/api.ts`, `resolveImage` in `src/server/menu/drive-images.ts` |
 | Suite names and counts | `package.json` and the last full run |
 
 **Deliberately not claimed, because it is not implemented**
@@ -1564,6 +1960,17 @@ written. What follows is what that audit found, including the gaps.
 - No client-side editing. Clients approve or request changes; they cannot
   modify the document.
 - No automatic menu sync. Syncing is always an explicit action.
+- No client portal. A connection link connects Google and does nothing else: it
+  cannot edit the website, publish, see version history or reach any other
+  project. It does not replace or alter the client preview link.
+- No Search Console in a client connection link. Nothing implemented needs it
+  from a business owner.
+- No way for this application to revoke a grant inside the client's Google
+  account. Disconnecting deletes the stored tokens here; withdrawing the grant
+  itself is done by the client at `myaccount.google.com`.
+- No second Google OAuth application, no second callback URL, no second token
+  store. Client connections extend the existing OAuth flow, the existing
+  AES-256-GCM encryption and the existing API client.
 - No legal-compliance feature. The application records an acknowledgement and
   nothing more.
 - No `GET /api/projects` listing endpoint (projects are listed by the page).
@@ -1576,5 +1983,12 @@ written. What follows is what that audit found, including the gaps.
 - Vercel and Netlify upload only the default-language document.
 - Copying `data/` while the server runs is unreliable (SQLite WAL).
 - Automatic local backups share a disk with the data they protect.
+- The client connection flow is verified end to end against
+  `scripts/mock-google.mjs`, including two separate Google accounts, partial
+  consent, refresh and per-account isolation. **Google's own consent screen and
+  Google's verification requirements for the three `.readonly` scopes are not
+  covered by any automated suite here, because no real Google credentials exist
+  in this environment.** A4.10 says what single real run to do before a first
+  handover, and this guide does not claim that run has been performed.
 
 No application functionality was changed to produce this document.

@@ -1,6 +1,7 @@
 import "server-only";
 import { db } from "../db";
 import { GoogleError, googleCall } from "./api";
+import type { Subject } from "./subject";
 
 /**
  * Read-only Google Analytics and Search Console.
@@ -64,9 +65,9 @@ export type AnalyticsProperty = {
   account: string;
 };
 
-export async function listAnalyticsProperties(userId: string): Promise<AnalyticsProperty[]> {
+export async function listAnalyticsProperties(subject: Subject): Promise<AnalyticsProperty[]> {
   const res = await googleCall(
-    userId,
+    subject,
     `${ANALYTICS_ADMIN}/v1beta/accountSummaries?pageSize=200`,
   );
   const data = (await res.json()) as {
@@ -97,9 +98,9 @@ export async function listAnalyticsProperties(userId: string): Promise<Analytics
  * it is public by design — it is in the page source of every site that uses
  * Analytics. The OAuth token that fetched it is not, and never leaves here.
  */
-export async function measurementIdFor(userId: string, propertyId: string): Promise<string> {
+export async function measurementIdFor(subject: Subject, propertyId: string): Promise<string> {
   const res = await googleCall(
-    userId,
+    subject,
     `${ANALYTICS_ADMIN}/v1beta/${encodeURI(propertyId)}/dataStreams?pageSize=50`,
   );
   const data = (await res.json()) as {
@@ -123,14 +124,14 @@ export type AnalyticsReport = {
 };
 
 export async function analyticsReport(
-  userId: string,
+  subject: Subject,
   propertyId: string,
   range: RangeId,
 ): Promise<AnalyticsReport> {
   const dates = window(range);
   const ask = async (dimension: string, metrics: string[], limit: number) => {
     const res = await googleCall(
-      userId,
+      subject,
       `${ANALYTICS_DATA}/v1beta/${encodeURI(propertyId)}:runReport`,
       {
         method: "POST",
@@ -188,8 +189,8 @@ export type SearchConsoleSite = {
   verified: boolean;
 };
 
-export async function listSearchConsoleSites(userId: string): Promise<SearchConsoleSite[]> {
-  const res = await googleCall(userId, `${SEARCH_CONSOLE}/webmasters/v3/sites`);
+export async function listSearchConsoleSites(subject: Subject): Promise<SearchConsoleSite[]> {
+  const res = await googleCall(subject, `${SEARCH_CONSOLE}/webmasters/v3/sites`);
   const data = (await res.json()) as {
     siteEntry?: { siteUrl?: string; permissionLevel?: string }[];
   };
@@ -216,7 +217,7 @@ export type SearchReport = {
 };
 
 export async function searchConsoleReport(
-  userId: string,
+  subject: Subject,
   siteUrl: string,
   range: RangeId,
 ): Promise<SearchReport> {
@@ -225,7 +226,7 @@ export async function searchConsoleReport(
   const dates = window(range, 2);
   const query = async (dimension: "query" | "page" | null, rowLimit: number) => {
     const res = await googleCall(
-      userId,
+      subject,
       `${SEARCH_CONSOLE}/webmasters/v3/sites/${encodeURIComponent(siteUrl)}/searchAnalytics/query`,
       {
         method: "POST",

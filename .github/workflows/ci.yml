@@ -72,6 +72,8 @@ jobs:
         run: npm run test:github
       - name: Backup and recovery suite
         run: npm run test:backup
+      - name: Client Google connection suite
+        run: npm run test:connect
 
       # --- suites that drive a running application -----------------------
       #
