@@ -42,7 +42,8 @@ than describing it aspirationally.
 6. [After it goes live](#b6-after-it-goes-live)
 7. [Analytics and Google](#b7-analytics-and-google)
 8. [Connecting your own Google account](#b8-connecting-your-own-google-account)
-9. [If something does not work](#b9-if-something-does-not-work)
+9. [The first time you open the application](#b9-the-first-time-you-open-the-application)
+10. [If something does not work](#b10-if-something-does-not-work)
 
 **Closing**
 
@@ -101,7 +102,7 @@ script if in doubt; it is short. It:
 > any of it. Do not read a clean `npm install` as proof that Ollama or Python
 > are present; read the script's own output.
 
-### A1.4 What happens on first launch
+### A1.4 What happens on first launch (hosted or from source)
 
 - The SQLite database is created and migrated on the **first query**, not at
   import time (`src/server/db.ts` opens lazily behind a Proxy).
@@ -111,6 +112,10 @@ script if in doubt; it is short. It:
   download.
 - There are **no users**. You create the first account through the sign-up
   screen; there is no seeded administrator and no default password.
+
+The **Windows desktop application** does considerably more than this on its
+first launch, because nobody is going to open a terminal for it. See
+[A1.8](#a18-first-launch-of-the-windows-desktop-application).
 
 ### A1.5 What requires your explicit confirmation
 
@@ -169,6 +174,184 @@ the site suite reports `282/282 checks passed`.
 
 > `npm run lint` is currently broken — Next 16 removed `next lint` and reads
 > `lint` as a directory name. Use `npm run typecheck`. CI does not run lint.
+
+### A1.8 First launch of the Windows desktop application
+
+Install the `.exe`, open it, use it. Nothing is installed from a terminal, and
+nobody is asked to fetch a model by hand. The installer installs the
+application; the first launch provisions the large assets.
+
+**The sequence, in order.** Every step reports itself on the setup screen, and
+each one either verified or was consciously declined before the next begins.
+
+```
+INSTALL
+  ↓
+FIRST LAUNCH
+  ↓  read %LOCALAPPDATA%\app.websitegenerator.desktop\setup-state.json
+  ↓
+Prepare the application    folders and settings
+Check your computer        Windows build, CPU, RAM, GPU, VRAM, CUDA, free space
+Check installed components Node (shipped), Python (optional)
+Install design skills      every file the manifest requires, then run the catalogue
+Check free space           the WHOLE job, before anything large is fetched
+Prepare local AI           detect Ollama · install it if missing · start it · wait
+Download the AI model      real byte counts from Ollama
+Verify the AI model        load it and ask it something
+Finish                     only if every component is accounted for
+  ↓
+Website Generator opens
+```
+
+**What is downloaded, and what is not.**
+
+| Component | Size | Where from | When |
+| --- | --- | --- | --- |
+| The application | the installer | your `.exe` | install time |
+| Node runtime, npm, the vendored design catalogue | in the installer | your `.exe` | install time |
+| `ui-ux-pro-max-cli` and its catalogue | ~12 MB | npm | first launch |
+| Ollama | ~700 MB download, ~4.5 GB installed | ollama.com or winget | first launch, only if absent |
+| The local AI model | ~400 MB (`qwen2.5:0.5b`) | Ollama's registry | first launch, only if absent |
+
+Neither Ollama nor the model is bundled into the installer. That is deliberate:
+it would add gigabytes to every download, including for the users who already
+have both, and the packaging suite asserts it.
+
+**Why internet access is needed once.** The model and the current catalogue
+release are fetched on that first launch. Afterwards everything runs locally —
+the local model never calls out, and the catalogue is files on disk.
+
+**Storage.** Budget about **9 GB free** for a machine with no Ollama, and about
+**3.5 GB** for one that already has it. The check is made before any download
+starts and covers the Ollama installation, the model, the catalogue, temporary
+download space and working room; the exact numbers live in `disk` in the
+manifest.
+
+**Where the record lives.** One file:
+
+```
+%LOCALAPPDATA%\app.websitegenerator.desktop\setup-state.json
+```
+
+It holds a schema version, a bootstrap revision, an overall status
+(`not_started` · `in_progress` · `completed` · `failed`) and one record per
+component with its status, an identifier where one applies, when it was last
+checked and any error. It holds **no** credential of any kind, and the suite
+checks the produced file for credential-shaped strings.
+
+### A1.9 The one authoritative manifest
+
+`desktop/bootstrap/manifest.json` is what this application considers mandatory.
+It is read by the first-launch bootstrap **and** by the running server
+(`src/server/setup-manifest.ts` imports it), so there is one definition of
+"required" rather than two that drift:
+
+| Section | What it decides |
+| --- | --- |
+| `runtime` | Node minimum, and that Python is optional |
+| `skills` | every required skill, every file that proves it, and the call that verifies it |
+| `ai.requiredModel` | **the** model identifier — `WG_OLLAMA_MODEL` overrides it, nothing else may name a default |
+| `ai.models` | the hardware ladder the recommendation chooses from |
+| `ai.readiness` | the start, install, poll and verify timeouts |
+| `ai.installer` | the Ollama download URL and the integrity rules applied before it is run |
+| `application` | required directories, and the state file's name |
+| `completion` | which components are mandatory and which may be declined |
+| `disk` | the space budget for the whole first launch |
+
+Bump `revision` only when a release genuinely needs an installed component to
+change; it re-runs provisioning on every existing installation.
+
+### A1.10 What "complete" means
+
+Setup reports itself complete only when every component is accounted for:
+
+- **mandatory** — `application`, `runtime`, `skills` — must have verified.
+- **may be declined** — `ollama`, `model` — must have verified, *or* the user
+  must have been shown the failure and have chosen to continue without it. That
+  choice is recorded as `skipped` and the installation is marked `degraded`.
+
+Anything else and `completedAt` stays null, the status is `failed`, and the next
+launch carries on from where it stopped. A UI that showed a tick is not a
+component that is ready; the tick comes from the check, never the reverse.
+
+The checks that stand behind each tick:
+
+| Component | What is actually done |
+| --- | --- |
+| Design skills | every file in `requiredFiles` present, non-empty and openable, then the catalogue is run and must return a design system |
+| Ollama | `/api/tags` polled with backoff until it answers, within the manifest's timeout |
+| Model | it must appear in Ollama's own installed list, then be loaded and answer a fixed minimal prompt |
+
+That last check sends a fixed instruction at temperature zero with a 64-token
+ceiling. It is a health check, and nothing about anybody's business goes into it.
+
+### A1.11 Interrupted setup, and later launches
+
+**Interrupted.** The model is recorded as `pending` *before* the download
+starts, so a machine switched off mid-download is a known state. The next launch
+reads it, says "Finishing your setup", and continues: Ollama keeps the blobs it
+already fetched, so the percentage resumes partway along. Nothing deletes a
+partial download to "start clean" — that would throw away exactly the gigabyte
+the user has already paid for.
+
+**Later launches are fast, and stay fast.** A launch does a handful of `stat`
+calls and, when a model is recorded as installed, one request to a daemon on the
+same machine. No hardware probe, no npm, no network. Measured in the suite at
+well under a second.
+
+**But "complete" is a claim about the computer, not about a file.** A launch
+reopens setup when:
+
+| Situation | Reason reported | What is done |
+| --- | --- | --- |
+| A download was cut off | `resume-download` | continue the pull |
+| A required catalogue file is missing from the installed copy | `skills-missing` | reinstall that skill only |
+| The model was deleted from Ollama | `model-missing` | download that model only |
+| The bootstrap revision changed | `update` | only the steps that changed |
+| Repair was requested from the application | `repair` | only what is missing |
+
+Nothing else re-runs. A model that is present is never downloaded again, and a
+catalogue that is whole is never reinstalled.
+
+### A1.12 Repair Installation
+
+**Profile → Installation.** Two buttons, and they do different things.
+
+- **Check installation** reports every component against this machine, and
+  loads the model to confirm it answers. This is the honest answer to "does it
+  actually work", and it is why the button exists separately.
+- **Repair installation** provisions only what is missing. A model that is
+  absent is downloaded there and then. Anything that needs the launcher — a
+  catalogue to reinstall, Ollama itself — is recorded as a repair request, and
+  the next launch does it.
+
+Repairing never removes a working component and never re-downloads a present
+one. The card shows no filesystem path and no stack trace.
+
+Behind it: `GET /api/setup?readiness=1` for the report, `&verify=1` to load the
+model, and `POST /api/setup {"action":"repair"}`.
+
+### A1.13 Troubleshooting a failed first launch
+
+| Symptom | Cause | Fix |
+| --- | --- | --- |
+| "An internet connection is needed to finish setting up" | No route out before a large download | Connect and press Try again. Nothing was half-installed. |
+| "There is not enough free space…" | The whole-job budget does not fit | Free the stated amount and press Try again; the machine is re-measured, not read from the record |
+| "The Ollama download could not be verified, so it was not run" | The bytes were not a Windows installer, were truncated, or did not match a pinned checksum | Try again. On a network with a captive portal, sign in to it first. Nothing was executed. |
+| "Ollama is installed but did not start" | The service had not come up inside the timeout | Try again — the wait backs off and starts fresh. If it persists, start Ollama once by hand and reopen. |
+| "The model downloaded but did not answer correctly" | A corrupted blob, or not enough memory to load it | Try again to re-pull. On a small machine, choose a smaller model on the same screen. |
+| "…is installed but did not answer" during a check | Same, on an existing installation | Setup reinstalls it automatically rather than reporting it as working |
+| The download stalls near the end | Ollama is verifying the blobs it fetched — a phase with no byte count | The bar shows an indeterminate indicator rather than a made-up number. Wait. |
+| Setup finished but the local AI is off | It was declined, and that was recorded | Profile → Installation → Repair installation |
+| "Setup is not finished" | A mandatory component did not verify | Reopen the application; it continues from where it stopped |
+| Repeated "Repairing your installation" on every launch | Something is deleting the catalogue between launches — antivirus or a cleanup tool | Exclude the application's data folder |
+
+To pin the Ollama installer to a build you have checked yourself, set
+`WG_OLLAMA_SETUP_SHA256` to its SHA-256 and the download is refused unless it
+matches. Without a pin, the download is still checked for length against the
+declared Content-Length, for a plausible size, and for a real Windows executable
+signature — Ollama publishes no stable per-release digest at a floating URL, so
+a pin cannot be shipped honestly in the manifest.
 
 ---
 
@@ -1163,8 +1346,8 @@ npm run test:design-systems # 59
 npm run test:design         # 21
 npm run test:menu           # 93
 npm run test:gemini         # 75
-npm run test:setup          # 40
-npm run test:desktop        # 55
+npm run test:setup          # 128
+npm run test:desktop        # 60
 npm run test:github         # 175
 npm run test:backup         # 95
 npm run test:connect        # 77
@@ -1175,7 +1358,16 @@ npm run test:studio         # 230
 npm run test:mobile         # 223
 ```
 
-CI runs all of them on every push. **1,485 checks in total.**
+CI runs all of them on every push. **1,578 checks in total.**
+
+`test:setup` drives `desktop/bootstrap/run.mjs` exactly as the Tauri shell does
+— spawning it, reading its NDJSON, answering its questions — against
+`scripts/mock-ollama.mjs`, whose failure modes are switchable: a daemon that is
+listening but not serving yet, one that never serves, a pull that dies partway,
+a model that is listed but will not load, and Ollama's own delete endpoint so
+"the model was removed afterwards" is a real case rather than a hypothesis. It
+also starts the built application against a recorded installation and exercises
+the readiness report and Repair Installation over HTTP.
 
 `test:connect` runs against `scripts/mock-google.mjs`, which implements the exact
 OAuth, Sheets, Drive, Analytics and Search Console endpoints, response shapes and
@@ -1288,6 +1480,14 @@ Complete **every** line before handing a website to a client.
 - [ ] A menu sync run since the client connected, and it found the photographs
 - [ ] The connection link **withdrawn** now that it has been used
 - [ ] No Analytics property of your own left selected on the client's project
+
+**Desktop installation** *(where the client runs the application themselves)*
+
+- [ ] Installed from the `.exe` on a machine that had neither Ollama nor the model
+- [ ] First launch completed without a terminal
+- [ ] Profile → Installation → **Check installation**: every line reads working
+- [ ] Closed and reopened: no download, no wait
+- [ ] The client told what the first launch does and how long it takes
 
 **Handoff**
 
@@ -1768,7 +1968,98 @@ Google account to your website instead of yours, so:
 
 ---
 
-## B9. If something does not work
+## B9. The first time you open the application
+
+This section is only for you if **you** installed Website Generator on your own
+Windows computer. If someone else builds your website for you, skip it — there
+is nothing here you need to do.
+
+### What happens
+
+You open the application and it spends a few minutes getting itself ready. It
+does this **once**. You will see a list like this, filling in as it goes:
+
+```
+✓ Preparing the application
+✓ Checking your computer
+✓ Checking installed components
+✓ Installing design skills
+✓ Checking free space
+✓ Preparing local AI
+● Downloading AI model
+○ Verifying AI model
+○ Finishing setup
+```
+
+You do not have to type anything or install anything yourself. The one question
+it asks is which AI model to use, and it recommends one and explains why —
+pressing the first button is the right answer.
+
+### Why it needs the internet, this once
+
+Two things are fetched: a small AI model that helps choose your website's design,
+and the design catalogue it chooses from. Neither fits sensibly in the download
+you already made.
+
+After this, everything runs on your own computer. Nothing about your business is
+sent anywhere by the AI part of the application.
+
+### How much space it needs
+
+About **9 GB free** on the drive it is installed on, or about **3.5 GB** if you
+already use Ollama on this computer. It checks before it starts downloading and
+tells you exactly how much it needs if there is not enough — it will not start a
+download that cannot finish.
+
+### If you close it halfway through
+
+Nothing is lost. Open it again and it carries on from where it stopped: it does
+not start the download over, and it does not reinstall what it already got.
+
+If the download was interrupted, the heading says **Finishing your setup**
+rather than setting up, which is how you know it is continuing rather than
+starting again.
+
+### Every time after that
+
+It opens straight away. Nothing is downloaded, nothing is reinstalled, and there
+is no waiting.
+
+It does check quickly that what it needs is still there. If something has gone
+missing — if you removed the AI model, or a cleanup tool deleted part of the
+design catalogue — it fetches just that one thing and then opens normally. It
+will say **Repairing your installation** so you know why it is taking a moment.
+
+### If you want to check, or to fix something
+
+**Profile → Installation.**
+
+- **Check installation** looks at everything and tells you what is working. It
+  loads the AI model and asks it something, so this is a real answer rather than
+  a guess.
+- **Repair installation** installs only what is missing. It never removes
+  anything that is working and never downloads anything you already have.
+
+### If the AI model will not download
+
+| What you see | What to do |
+| --- | --- |
+| "An internet connection is needed to finish setting up" | Connect to the internet and press **Try again**. Nothing was half-installed. |
+| "There is not enough free space" | It tells you how much is needed and how much you have. Free that much and press **Try again**. |
+| "The Ollama download could not be verified, so it was not run" | Press **Try again**. On a café or hotel network, sign in to the network first. Nothing was run on your computer. |
+| "Ollama is installed but did not start" | Press **Try again**. It waits longer each time. |
+| "The model downloaded but did not answer correctly" | Press **Try again** to fetch it again. On an older computer, choose the smaller model offered on the same screen. |
+| It seems stuck near the end | It is checking what it downloaded — a stage that has no percentage, so the bar sweeps instead. Give it a minute. |
+| "Setup is not finished" | Close the application and open it again. It will carry on. |
+
+You can also skip the AI model entirely and use the application without it — it
+still builds complete websites. If you skip it, the application says so rather
+than quietly pretending it is there, and you can add it later from **Profile →
+Installation**.
+
+---
+
+## B10. If something does not work
 
 Work down the "What I check" column first. Most problems are on that list.
 
@@ -1840,6 +2131,13 @@ Use this as a sign-off sheet, once per delivered website.
 - [ ] Search Console verified by Google, not assumed
 - [ ] Consent responsibility explicitly discussed and recorded in writing
 
+**Desktop first launch** *(if the client runs the application)*
+
+- [ ] `npm run test:setup` clean, `npm run test:desktop` clean
+- [ ] A real fresh-install first launch performed on Windows at least once
+- [ ] Profile → Installation reports every component working after handover
+- [ ] The second launch is immediate, with nothing downloaded
+
 **Client Google connection** *(if applicable)*
 
 - [ ] The project's Client Google screen names the **client's** email
@@ -1893,6 +2191,13 @@ Use this as a sign-off sheet, once per delivered website.
 - [ ] I have the registrar login, and I keep it
 - [ ] I added the DNS records exactly as sent
 - [ ] `https://mydomain` opens my website with a padlock
+
+**If I installed the application myself**
+
+- [ ] The first launch finished on its own, without me installing anything
+- [ ] I did not have to open a terminal or type any commands
+- [ ] Opening it a second time was immediate
+- [ ] Profile → Installation → Check installation says everything is working
 
 **If I connected my own Google account**
 
@@ -1948,12 +2253,33 @@ written. What follows is what that audit found, including the gaps.
 | Per-service verification and status roll-up | `src/server/connect/verify.ts` |
 | What the client's page shows and never shows | `src/app/connect/[token]/page.tsx`, `src/components/ClientConnectScreen.tsx` |
 | Drive folder file-name resolution | `findInFolder` in `src/server/google/api.ts`, `resolveImage` in `src/server/menu/drive-images.ts` |
+| First-launch sequence, resume, repair | `desktop/bootstrap/run.mjs`, `state.mjs` |
+| What a complete installation consists of | `desktop/bootstrap/manifest.json` |
+| The required model, in one place | `ai.requiredModel` in the manifest, read by `src/server/setup-manifest.ts` and `desktop/bootstrap/manifest.mjs` |
+| Skill files, readability and the loader check | `requiredFiles` and `verify` in the manifest, `desktop/bootstrap/uiux.mjs`, `src/server/setup-readiness.ts` |
+| Ollama detection, readiness polling and installer integrity | `desktop/bootstrap/localai.mjs` |
+| Disk budget figures | `disk` in the manifest, `diskBudgetGb` and `diskCheck` |
+| The completion rule | `completion` in the manifest, `completionCheck` |
+| Readiness report and Repair Installation | `src/server/setup-readiness.ts`, `src/app/api/setup/route.ts` |
+| Storage figures quoted for first launch | `disk` in the manifest, and the published Ollama download size |
 | Suite names and counts | `package.json` and the last full run |
 
 **Deliberately not claimed, because it is not implemented**
 
 - No scheduled or automatic backups on a timer. The only automatic backup is
   the one taken before a project is deleted.
+- No silent substitution of a different AI model. The model comes from one
+  manifest value; a machine that cannot carry it is offered a smaller one on the
+  ladder and told why, and declining is recorded rather than assumed.
+- No pinned checksum for the Ollama installer in the manifest. Ollama publishes
+  no stable per-release digest at its floating download URL, so the checks that
+  ship are the ones that do not need one — declared length, plausible size and a
+  real Windows executable signature — plus `WG_OLLAMA_SETUP_SHA256` for an
+  operator who has verified a specific build.
+- No elevation. The application installs for the current user and cannot install
+  Ollama for a machine that needs an administrator; it says so.
+- No AI model or Ollama runtime inside the installer. Both are first-launch
+  downloads, and the packaging suite asserts it.
 - No automatic DNS configuration. No DNS provider is connected and none can be.
 - No domain registration or purchase.
 - No certificate issuance — GitHub Pages does that.
@@ -1990,5 +2316,14 @@ written. What follows is what that audit found, including the gaps.
   covered by any automated suite here, because no real Google credentials exist
   in this environment.** A4.10 says what single real run to do before a first
   handover, and this guide does not claim that run has been performed.
+
+- The first-launch flow is verified end to end against `scripts/mock-ollama.mjs`,
+  including a daemon that is not ready yet, one that never becomes ready, an
+  interrupted pull, a failed pull, a model that will not load, a deleted model, a
+  damaged catalogue file, a full disk and a record written by an older version.
+  **What no automated suite here covers is a real Windows machine:** the NSIS
+  installer, the real Ollama installer's own prompts, winget, and a real model
+  download. A1.8 describes the sequence those perform; this guide does not claim
+  that sequence has been run on Windows.
 
 No application functionality was changed to produce this document.

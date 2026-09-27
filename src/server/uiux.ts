@@ -53,6 +53,11 @@ function skillRoot(): { dir: string; source: "installed" | "vendored" } {
   return { dir: VENDORED, source: "vendored" };
 }
 
+/** Where the catalogue is being read from, for the readiness report. */
+export function skillRoots(): { installed: string | null; bundled: string } {
+  return { installed: process.env.WG_UIUX_SKILL_DIR ?? null, bundled: VENDORED };
+}
+
 export type SkillDesignSystem = {
   project_name: string;
   category: string;

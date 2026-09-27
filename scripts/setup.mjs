@@ -13,9 +13,12 @@
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import path from "node:path";
+import { ollamaHost, requiredModel } from "../desktop/bootstrap/manifest.mjs";
 
-const HOST = (process.env.OLLAMA_HOST || "http://127.0.0.1:11434").replace(/\/+$/, "");
-const MODEL = process.env.WG_OLLAMA_MODEL || "qwen2.5:0.5b";
+// The same manifest the desktop first-launch bootstrap and the server read, so
+// `npm run setup` can never disagree with them about which model is required.
+const HOST = ollamaHost();
+const MODEL = requiredModel();
 
 const ok = (m) => console.log(`  ✓ ${m}`);
 const no = (m) => console.log(`  · ${m}`);

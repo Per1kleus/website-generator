@@ -110,10 +110,23 @@ function setupEnvironment(dataDir) {
     const marker = path.join(dataDir, "setup-state.json");
     if (!existsSync(marker)) return env;
     const state = JSON.parse(readFileSync(marker, "utf8"));
-    const skill = state?.uiux?.path;
-    if (skill && existsSync(path.join(skill, "scripts", "search.py"))) {
-      env.WG_UIUX_SKILL_DIR = skill;
-    }
+
+    /* The skill the setup installed, if it installed one.
+       Only an "installed" copy is handed over. When setup fell back to the copy
+       bundled inside the application, the server finds that one by itself — and
+       pointing WG_UIUX_SKILL_DIR at it would make the application report an
+       installed release it does not have. */
+    const skills = state?.skills ?? {};
+    const installed = Object.values(skills).find(
+      (s) => s?.source === "installed" && s?.path && existsSync(path.join(s.path, "scripts", "search.py")),
+    );
+    const legacy =
+      state?.uiux?.path && existsSync(path.join(state.uiux.path, "scripts", "search.py"))
+        ? state.uiux.path
+        : null;
+    const skillDir = installed?.path ?? legacy;
+    if (skillDir) env.WG_UIUX_SKILL_DIR = skillDir;
+
     // Only a model that finished downloading and answered is handed over.
     if (state?.model?.id && state.model.pending === false) {
       env.WG_OLLAMA_MODEL = state.model.id;

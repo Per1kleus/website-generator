@@ -19,15 +19,26 @@
  *   completely alone.
  */
 import { execFile } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { closeSync, existsSync, openSync, readFileSync, readSync, statSync } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
+import { skills } from "./manifest.mjs";
+import { bundledSkillDir, defaultSkillDir } from "./state.mjs";
 
 const execFileAsync = promisify(execFile);
 
-export const PACKAGE = "ui-ux-pro-max-cli";
+/**
+ * The skills a complete installation has, from the manifest.
+ *
+ * "All required skills, not only the first one that happens to be needed" is a
+ * requirement, so the list is data and every function below iterates it. There
+ * is one today; adding a second is a manifest entry, not a code change.
+ */
+export const REQUIRED = skills();
+
+export const PACKAGE = REQUIRED[0]?.package ?? "ui-ux-pro-max-cli";
 /** Claude Code's layout is the one this application's generator reads. */
-export const ASSISTANT = "claude";
+export const ASSISTANT = REQUIRED[0]?.assistant ?? "claude";
 
 export function toolsDir(dataDir) {
   return path.join(dataDir, "tools");
@@ -38,8 +49,8 @@ export function skillHome(dataDir) {
   return path.join(dataDir, "uiux");
 }
 
-export function skillDir(dataDir) {
-  return path.join(skillHome(dataDir), ".claude", "skills", "ui-ux-pro-max");
+export function skillDir(dataDir, skill = REQUIRED[0]) {
+  return defaultSkillDir(dataDir, skill);
 }
 
 /**
@@ -110,18 +121,44 @@ async function runNpm(npm, args, cwd) {
  * Is a usable skill already there?
  *
  * An application update must not reinstall what is already installed and
- * working, so this is the question asked before anything is downloaded.
+ * working, so this is the question asked before anything is downloaded. And
+ * "there" means every file the manifest names, readable and non-empty — an npm
+ * install killed halfway leaves a directory behind with half its catalogue, and
+ * a directory existing is the one thing that must never be taken as proof.
  */
-export function existing(dataDir) {
-  const dir = skillDir(dataDir);
-  const search = path.join(dir, "scripts", "search.py");
-  const data = path.join(dir, "data", "styles.csv");
-  if (!existsSync(search) || !existsSync(data)) return null;
+export function existing(dataDir, skill = REQUIRED[0]) {
+  if (!skill) return null;
+  const dir = skillDir(dataDir, skill);
+  const missing = missingFiles(dir, skill);
+  if (missing.length) return null;
   return {
+    id: skill.id,
     path: dir,
     version: installedVersion(toolsDir(dataDir)),
     source: "cli",
   };
+}
+
+/** Which of a skill's required files are absent, empty or unreadable. */
+export function missingFiles(dir, skill) {
+  return skill.requiredFiles.filter((relative) => {
+    const file = path.join(dir, relative);
+    try {
+      const info = statSync(file);
+      if (!info.isFile() || info.size === 0) return true;
+      /* Readable, not merely present: a file this process cannot open is as
+         useless to the design catalogue as one that is not there. One byte is
+         enough to prove it and avoids reading a megabyte of CSV to find out. */
+      const fd = openSync(file, "r");
+      try {
+        return readSync(fd, Buffer.alloc(1), 0, 1, 0) !== 1;
+      } finally {
+        closeSync(fd);
+      }
+    } catch {
+      return true;
+    }
+  });
 }
 
 /**
@@ -171,27 +208,72 @@ export async function install(dataDir, { resources = null, report = () => {} } =
 }
 
 /**
- * Prove the skill can answer, not just that its files are on disk.
+ * Prove a skill can answer, not just that its files are on disk.
+ *
+ * The check is the manifest's: the same script, the same arguments and the same
+ * key in the answer that the application's own generator depends on. So
+ * "verified" means the loader can use it, which is the only definition worth
+ * recording.
  *
  * Python drives the search, so with no interpreter this reports `false` with a
- * reason instead of failing: the application falls back to its rule set, which
- * is the same behaviour as any machine without Python.
+ * reason rather than failing outright: the application falls back to its own
+ * rules, which is the same behaviour as any machine without Python.
  */
-export async function verify(dataDir, python = "python3") {
-  const dir = skillDir(dataDir);
-  const search = path.join(dir, "scripts", "search.py");
-  if (!existsSync(search)) return { ok: false, reason: "not-installed" };
+export async function verify(dataDir, python = "python3", skill = REQUIRED[0], { dir = null } = {}) {
+  if (!skill) return { ok: false, reason: "no-skill-required" };
+  const root = dir ?? skillDir(dataDir, skill);
+
+  const missing = missingFiles(root, skill);
+  if (missing.length) {
+    return { ok: false, reason: "not-installed", missing };
+  }
+
+  const spec = skill.verify;
   try {
     const { stdout } = await execFileAsync(
       python,
-      [search, "warm artisanal cafe", "--design-system", "--json"],
-      { cwd: dir, timeout: 60_000, windowsHide: true, maxBuffer: 8 * 1024 * 1024 },
+      [path.join(root, spec.script), ...spec.args],
+      { cwd: root, timeout: spec.timeoutMs, windowsHide: true, maxBuffer: 8 * 1024 * 1024 },
     );
     const parsed = JSON.parse(stdout);
-    return { ok: Boolean(parsed?.design_system), reason: null };
+    return { ok: Boolean(parsed?.[spec.expectKey]), reason: null, missing: [] };
   } catch (err) {
-    return { ok: false, reason: `search-failed: ${firstLine(err)}` };
+    return { ok: false, reason: `search-failed: ${firstLine(err)}`, missing: [] };
   }
+}
+
+/**
+ * Every required skill, checked the same way.
+ *
+ * Returns one record per skill so the setup can report "3 of 3 installed,
+ * 3 verified" rather than a single boolean that hides which one is broken.
+ */
+export async function verifyAll(dataDir, python = "python3", { resources = null, state = null } = {}) {
+  const out = {};
+  for (const skill of REQUIRED) {
+    // Prefer the installed copy; fall back to the one bundled with the
+    // application, which is a complete catalogue in its own right.
+    const installedDir = state?.skills?.[skill.id]?.path ?? skillDir(dataDir, skill);
+    const installedMissing = missingFiles(installedDir, skill);
+    const dir = installedMissing.length ? bundledSkillDir(resources, skill) : installedDir;
+
+    const result = await verify(dataDir, python, skill, { dir });
+    out[skill.id] = {
+      id: skill.id,
+      label: skill.label,
+      path: dir,
+      source: dir === installedDir ? "installed" : "bundled",
+      /** Whether the recorded copy has lost files, which is what a repair fixes. */
+      installedMissing,
+      required: skill.requiredFiles.length,
+      installed: skill.requiredFiles.length - (result.missing?.length ?? 0),
+      missing: result.missing ?? [],
+      complete: (result.missing?.length ?? 0) === 0,
+      verified: result.ok,
+      reason: result.reason,
+    };
+  }
+  return out;
 }
 
 function firstLine(err) {

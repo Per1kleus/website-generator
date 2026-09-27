@@ -1,4 +1,5 @@
 import "server-only";
+import { ollamaHost, requiredModel } from "./setup-manifest";
 
 /**
  * Local design model via Ollama.
@@ -18,14 +19,17 @@ import "server-only";
  * fall back to a deterministic query builder, and generation proceeds.
  */
 
-const HOST = (process.env.OLLAMA_HOST || "http://127.0.0.1:11434").replace(/\/+$/, "");
+const HOST = ollamaHost();
 
 /**
- * The default is the smallest model that reliably follows an instruction and
- * emits valid JSON. Bigger models do this better, but not better enough to
- * justify the download for a query-rewriting task.
+ * The model this application requires, from the setup manifest — the same value
+ * the first-launch bootstrap provisions and verifies.
+ *
+ * It used to be a literal here as well as in the bootstrap's model ladder. Two
+ * copies of a value that must agree is a bug with a delay on it: change one and
+ * the setup downloads a model the server then reports as missing.
  */
-export const DEFAULT_MODEL = process.env.WG_OLLAMA_MODEL || "qwen2.5:0.5b";
+export const DEFAULT_MODEL = requiredModel();
 
 /** Auto-pull on first launch unless explicitly disabled. */
 export const AUTOPULL = process.env.WG_OLLAMA_AUTOPULL !== "0";

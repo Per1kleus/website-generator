@@ -50,30 +50,60 @@ Application launched
 Is it initialised?  ──yes──▶  start the server, open the app   (~1s)
         │no
         ▼
+Prepare the application its own folders, from the manifest
+        ↓
 Check the computer      Windows version, CPU, cores, RAM, GPU, VRAM,
         ↓               CUDA, free disk space
 Check components        which runtimes are already present
         ↓
-Install UI/UX Pro Max   npm install ui-ux-pro-max-cli → uipro init --ai claude
+Install design skills   every required file, then the catalogue is run
         ↓
-Prepare local AI        install Ollama only if it is missing
+Check free space        the WHOLE job, before anything large is fetched
         ↓
+Prepare local AI        install Ollama only if it is missing, verifying the
+        ↓               installer before it is run; poll until it answers
+
 Recommend a model       shown with the reason; nothing downloads until you agree
         ↓
 Download                real byte counts, resumable
         ↓
 Verify                  the model must answer, not just exist
         ↓
-Mark initialised        %APPDATA%\app.websitegenerator.desktop\setup-state.json
+Mark initialised        only if every component is accounted for
+                        %LOCALAPPDATA%\app.websitegenerator.desktop\setup-state.json
         ↓
 Open the application
 ```
 
 The bootstrap is a Node process that reports newline-delimited JSON on stdout
 and takes answers on stdin; the shell renders that as the setup screen. Keeping
-it out of Rust is what makes `npm run test:setup` possible — 40 checks over
-first launch, second launch, "only what is missing", an interrupted download,
-a failed step, and a damaged state file, none of which need a window.
+it out of Rust is what makes `npm run test:setup` possible — 128 checks over
+first launch, second launch, "only what is missing", an interrupted download, a
+failed download, a model that will not load, a deleted model, a damaged
+catalogue, a full disk, a record from an older version, a damaged record, and the
+readiness and repair paths inside the running application. None of them need a
+window.
+
+### One manifest
+
+`desktop/bootstrap/manifest.json` is what a complete installation consists of,
+and it is the only place that says so. The bootstrap reads it; so does the
+running server, through `src/server/setup-manifest.ts`.
+
+| Section | What it decides |
+| --- | --- |
+| `runtime` | Node minimum, and that Python is optional |
+| `skills` | every required skill, the files that prove it, and the call that verifies it |
+| `ai.requiredModel` | **the** model identifier — `WG_OLLAMA_MODEL` overrides it, nothing else may name a default |
+| `ai.models` | the hardware ladder |
+| `ai.readiness` | start, install, poll and verify timeouts |
+| `ai.installer` | the download URL and the integrity rules applied before it is run |
+| `application` | required directories, and the state file's name |
+| `completion` | which components are mandatory, and which may be declined |
+| `disk` | the space budget for the whole first launch |
+
+`revision` is bumped only when a release genuinely needs an installed component
+to change.
 
 ### What is installed, and what is not
 
@@ -83,9 +113,22 @@ Nothing is installed that is already there. The setup checks first, every time:
 | --- | --- | --- |
 | Node | always — it ships inside the app | — |
 | Python | used for the catalogue search | the catalogue falls back to built-in rules; setup continues |
-| UI/UX Pro Max | kept, with its version reported | installed with its own CLI |
-| Ollama | used as it is, models included | installed with winget, or the vendor's installer |
-| The model | kept and verified | downloaded after you confirm |
+| UI/UX Pro Max | kept, with its version reported — checked file by file, not by the directory existing | installed with its own CLI; a copy that has lost files is repaired |
+| Ollama | used as it is, models included | installed with winget, or the vendor's installer after the download is verified |
+| The model | kept, and still asked to answer | downloaded after you confirm |
+
+Neither Ollama nor the model is inside the installer. Roughly: the catalogue is
+~12 MB from npm, Ollama is a ~700 MB download that installs ~4.5 GB, and the
+model is ~400 MB. Budget about **9 GB free** with no Ollama, or **3.5 GB** with
+it — the check runs before any download and refuses with both figures rather than
+starting something that cannot finish.
+
+**The installer is verified before it is executed.** The bytes received must
+match the declared length, the size must be plausible, and the file must carry a
+real Windows executable signature; `WG_OLLAMA_SETUP_SHA256` pins an exact digest
+when an operator has one. Ollama publishes no stable per-release digest at a
+floating URL, so a pin cannot ship in the manifest honestly — every check that
+does not need one does.
 
 ### Choosing a model
 
@@ -114,9 +157,16 @@ optional ones (the design system, the local AI) also offer Continue without it.
 Setup is marked complete only when each step has verified or been consciously
 skipped, so a half-finished install is never mistaken for a finished one.
 
-An interrupted model download is recorded as unfinished. The next launch says
-"Finishing your setup" and continues the download — Ollama keeps the blobs it
-already has, and nothing here deletes them to "start clean".
+An interrupted model download is recorded as unfinished — marked pending *before*
+the download starts, so a machine switched off mid-download is a known state. The
+next launch says "Finishing your setup" and continues the download; Ollama keeps
+the blobs it already has, and nothing here deletes them to "start clean".
+
+**Completion is a rule, not a screen.** `application`, `runtime` and `skills`
+must have verified. `ollama` and `model` must have verified *or* have been
+declined by the user after they saw the failure — recorded as `skipped`, with the
+installation marked `degraded`. Anything else and `completedAt` stays null, the
+status is `failed`, and the next launch carries on from where it stopped.
 
 ## Later launches
 
@@ -132,7 +182,39 @@ itself, which stops when the window closes.
 An application update does not redo any of this. The state file carries a
 bootstrap revision; setup re-runs only when a release genuinely changes what has
 to be installed, and even then it re-runs only the steps that changed. Models
-are never deleted by an update.
+are never deleted by an update. A record written by an earlier release is read
+for what it proves and carried forward rather than discarded, so an existing
+installation is not made to reinstall everything.
+
+### "Complete" is a claim about the computer
+
+The launch check is cheap — a handful of `stat` calls and, when a model is
+recorded as installed, one request to a daemon on the same machine — but it is a
+check, not a reading of the record:
+
+| Situation | Reported as | What is done |
+| --- | --- | --- |
+| A download was cut off | `resume-download` | continue the pull |
+| A required catalogue file is gone from the installed copy | `skills-missing` | reinstall that skill only |
+| The model was deleted from Ollama | `model-missing` | download that model only |
+| The revision changed | `update` | only the steps that changed |
+| Repair was asked for in the application | `repair` | only what is missing |
+
+A daemon that cannot be reached is "unknown", never "the model is gone": Ollama
+may simply not have started, and reopening setup for that would be wrong.
+
+### Repair Installation
+
+**Profile → Installation**, in the application itself.
+
+- **Check installation** reports every component against this machine and loads
+  the model to confirm it answers.
+- **Repair installation** provisions only what is missing. A missing model is
+  downloaded there and then; anything needing the launcher becomes a repair
+  request the next launch honours. Nothing working is removed and nothing present
+  is downloaded again.
+
+Neither shows a filesystem path or a stack trace.
 
 ## The builder is a desktop interface
 
@@ -238,6 +320,14 @@ builds on `windows-latest`, and that is the artefact to ship.
    installer is exactly the kind of guess that breaks on a user's machine. Both
    paths report failure clearly and can be retried, and the application works
    without local AI either way.
+
+   What *was* exercised, against a stub: the readiness polling (a daemon not
+   answering yet, and one that never answers), the model pull with real byte
+   counts, an interrupted pull and its resumption, a pull that fails, a model
+   that is listed but will not load, a deleted model, and every rejection path of
+   the installer verification — a truncated download, an implausible size, a page
+   served instead of an executable, and a checksum that does not match. What was
+   not exercised is the real `OllamaSetup.exe` and the real winget.
 3. **Windows shortcuts are the installer's.** The NSIS installer creates the
    Start Menu entry and offers a desktop shortcut on its finish page; this is
    Tauri's own bundling, not something this project reimplements.
@@ -246,3 +336,9 @@ builds on `windows-latest`, and that is the artefact to ship.
 5. **Auto-update is not wired up.** A new version means a new installer. The
    state file's revision field is what will make an update skip work that is
    already done.
+6. **A real Windows first launch has not been performed.** Everything in "First
+   launch" above is implemented and tested headlessly through the same bootstrap
+   the shell spawns, including the failure and recovery paths. Installing the
+   `.exe` on Windows, watching the setup screen, letting Ollama's own installer
+   run, downloading a real model and confirming the second launch is immediate
+   remains one real run — and this document does not claim it has happened.

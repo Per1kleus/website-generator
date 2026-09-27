@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { relativeTime, stateInfo, type ProjectState } from "@/lib/project-status";
+import { stateInfo, type ProjectState } from "@/lib/project-status";
+import { LocalTime } from "./LocalTime";
 import type { Project } from "@/server/projects";
 import { SITE_KINDS } from "@/lib/site";
 
@@ -78,7 +79,12 @@ export function ProjectCard({
         </p>
       )}
 
-      <p className="mt-2 text-xs text-muted">Updated {relativeTime(project.updated_at)}</p>
+      {/* Through LocalTime, because a relative time computed while rendering is
+          a hydration mismatch waiting for a boundary to cross: the server says
+          "1 minute ago" and the browser, a moment later, says "2 minutes ago". */}
+      <p className="mt-2 text-xs text-muted">
+        Updated <LocalTime ts={project.updated_at} mode="relative" />
+      </p>
 
       {/* Full-width tap target: the whole row is the action on a phone. */}
       <Link

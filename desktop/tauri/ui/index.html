@@ -126,7 +126,10 @@
     </div>
   </section>
 
-  <p class="note" id="internet">Setup needs an internet connection this once. Afterwards the local AI works offline.</p>
+  <p class="note" id="internet">
+    Setup needs an internet connection this once, to download the local AI model
+    and the design catalogue. Afterwards everything works offline.
+  </p>
 </main>
 
 <script type="module">
@@ -217,10 +220,18 @@
     }
   }
 
+  /* What the user is told this launch is doing. Each key is a reason the
+     bootstrap reports, and every one of them is a different situation the user
+     deserves a straight answer about — "setting up" when nothing is repairing,
+     "finishing" when a download was cut off, "repairing" when something that
+     was working has gone missing. */
   const HEADINGS = {
     "first-launch": ["Setting up your application", "This happens once. It takes a few minutes."],
     "resume-download": ["Finishing your setup", "Continuing the download that was interrupted."],
     update: ["Updating your application", "Only what changed is installed."],
+    repair: ["Repairing your installation", "Only the missing parts are installed again."],
+    "skills-missing": ["Repairing your installation", "Part of the design catalogue needs installing again."],
+    "model-missing": ["Repairing your installation", "The local AI model is no longer installed."],
   };
 
   function answer(id, payload) {
@@ -251,8 +262,19 @@
         break;
       case "failed":
         setState(event.id, "failed");
+        // Some failures carry a breakdown worth reading — how much space is
+        // needed and for what, rather than one number with no explanation.
+        if (event.detail) setDetail(event.id, event.detail);
         break;
       case "done":
+        if (event.reason === "incomplete") {
+          // Never "opening" when it is not ready. The application stays in
+          // setup, and says what is still outstanding.
+          el("heading").textContent = "Setup is not finished";
+          el("lede").textContent =
+            "Nothing has been lost. Reopening the application carries on from here.";
+          break;
+        }
         el("heading").textContent = "Opening Website Generator";
         el("lede").textContent = "";
         el("internet").hidden = true;

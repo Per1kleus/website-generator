@@ -383,6 +383,24 @@ try {
     resources.includes("server/"));
   record("the sidecar launcher and the first-launch bootstrap ship with it",
     resources.includes("sidecar/launch.mjs") && resources.includes("bootstrap/"));
+  record("the setup manifest travels with the bootstrap that reads it",
+    existsSync("desktop/bootstrap/manifest.json") && resources.includes("bootstrap/"));
+
+  /* The installer installs the application; the first launch fetches the large
+     assets. A model bundled into the .exe would add hundreds of megabytes to
+     every download, including for the users who already have it. */
+  const manifest = JSON.parse(readFileSync("desktop/bootstrap/manifest.json", "utf8"));
+  record("no AI model is bundled into the installer",
+    !Object.keys(conf.bundle?.resources ?? {}).some((k) => /\.gguf|models?\//i.test(k)) &&
+      !existsSync(path.join("desktop", "tauri", "models")));
+  record("the model is named as something the first launch downloads",
+    typeof manifest.ai.requiredModel === "string" && manifest.ai.requiredModel.length > 3,
+    manifest.ai.requiredModel);
+  record("nor is Ollama itself bundled — it is installed on first launch",
+    !Object.keys(conf.bundle?.resources ?? {}).some((k) => /ollama/i.test(k)) &&
+      typeof manifest.ai.installer.windowsUrl === "string");
+  record("the installer's own download is verified before it is run",
+    manifest.ai.installer.expectHeader === "MZ" && manifest.ai.installer.minBytes > 0);
   record("the Node runtime ships as an external binary, so the user installs nothing",
     (conf.bundle?.externalBin ?? []).includes("binaries/wg-node"));
 

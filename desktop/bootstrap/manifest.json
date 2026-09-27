@@ -1,0 +1,140 @@
+{
+  "_comment": [
+    "What this application considers mandatory before it can be used.",
+    "",
+    "One file, read by two consumers: the first-launch bootstrap in",
+    "desktop/bootstrap/ and the running server through",
+    "src/server/setup-manifest.ts. That is the point — a required model named in",
+    "two places is a required model that will eventually disagree with itself,",
+    "and the version that loses is always the one a user is looking at.",
+    "",
+    "JSON rather than a module because the bootstrap reads it with the bundled",
+    "Node runtime while the server has it inlined by the bundler, and JSON is",
+    "the one format both of those do without ceremony.",
+    "",
+    "Bump `revision` only when a release genuinely needs an installed component",
+    "to change. It re-runs provisioning for every existing installation."
+  ],
+  "schema": 2,
+  "revision": 2,
+
+  "runtime": {
+    "_comment": "Node ships with the application. Python is optional: without it the design catalogue falls back to the application's own rules, exactly as on a server without Python.",
+    "nodeMinimumMajor": 20,
+    "python": { "required": false, "candidates": ["python3", "python"] }
+  },
+
+  "skills": [
+    {
+      "id": "ui-ux-pro-max",
+      "label": "UI/UX Pro Max",
+      "package": "ui-ux-pro-max-cli",
+      "assistant": "claude",
+      "_comment": "Every file the design-system path actually opens. A directory existing proves nothing: an interrupted npm install leaves one behind with half its catalogue.",
+      "requiredFiles": [
+        "scripts/search.py",
+        "scripts/core.py",
+        "scripts/design_system.py",
+        "scripts/reasoning_contract.py",
+        "data/styles.csv",
+        "data/colors.csv",
+        "data/typography.csv",
+        "data/landing.csv",
+        "data/motion.csv",
+        "data/google-fonts.csv",
+        "data/ui-reasoning.csv",
+        "data/ux-guidelines.csv"
+      ],
+      "verify": {
+        "_comment": "The same call the generator makes, so 'verified' means the application can use it rather than that its files exist.",
+        "script": "scripts/search.py",
+        "args": ["warm artisanal cafe", "--design-system", "--json"],
+        "expectKey": "design_system",
+        "timeoutMs": 60000
+      },
+      "approximateMb": 12
+    }
+  ],
+
+  "ai": {
+    "host": "http://127.0.0.1:11434",
+    "_comment": "requiredModel is THE model identifier for this application. WG_OLLAMA_MODEL overrides it for an operator who has a reason; nothing else may name a default.",
+    "requiredModel": "qwen2.5:0.5b",
+    "readiness": {
+      "startTimeoutMs": 30000,
+      "installTimeoutMs": 600000,
+      "pollInitialMs": 400,
+      "pollMaxMs": 3000,
+      "verifyTimeoutMs": 120000
+    },
+    "installer": {
+      "windowsUrl": "https://ollama.com/download/OllamaSetup.exe",
+      "_comment": "Ollama publishes no stable per-release digest at this URL, so integrity is enforced by what can be checked: the bytes received must match the declared length, the file must be a real Windows executable, and it must be a plausible size. WG_OLLAMA_SETUP_SHA256 pins an exact digest when an operator has one.",
+      "minBytes": 100000000,
+      "maxBytes": 2000000000,
+      "expectHeader": "MZ",
+      "sha256Env": "WG_OLLAMA_SETUP_SHA256"
+    },
+    "models": [
+      {
+        "id": "qwen2.5:0.5b",
+        "label": "Qwen 2.5 0.5B",
+        "downloadGb": 0.4,
+        "runtimeGb": 1,
+        "needs": { "ramGb": 0 },
+        "summary": "Smallest model that reliably returns valid JSON."
+      },
+      {
+        "id": "qwen2.5:1.5b",
+        "label": "Qwen 2.5 1.5B",
+        "downloadGb": 1,
+        "runtimeGb": 2,
+        "needs": { "ramGb": 8 },
+        "summary": "Noticeably better at reading a business description."
+      },
+      {
+        "id": "qwen2.5:3b",
+        "label": "Qwen 2.5 3B",
+        "downloadGb": 1.9,
+        "runtimeGb": 3.5,
+        "needs": { "ramGb": 16 },
+        "summary": "Best query quality this application can actually use."
+      }
+    ]
+  },
+
+  "application": {
+    "_comment": "Created before anything else, so a later step never fails on a missing parent directory.",
+    "directories": ["uploads", "exports", "tools", "uiux"],
+    "stateFile": "setup-state.json"
+  },
+
+  "completion": {
+    "_comment": [
+      "Setup may only report itself complete when every component below is",
+      "accounted for.",
+      "",
+      "mandatory: must have verified. A failure here leaves setup incomplete and",
+      "the next launch resumes it — the application does not open pretending to",
+      "be ready.",
+      "",
+      "optionalWithConsent: must have verified, OR the user must have been shown",
+      "the failure and have chosen to continue without it. That choice is",
+      "recorded as `skipped`. The application genuinely generates websites with",
+      "no local model, so trapping someone in a setup screen over one would be",
+      "worse than starting — but it is never decided on their behalf and never",
+      "silently."
+    ],
+    "mandatory": ["application", "runtime", "skills"],
+    "optionalWithConsent": ["ollama", "model"]
+  },
+
+  "disk": {
+    "_comment": "The whole first launch, not just the model. Ollama installs about 4.5 GB of runtime and CUDA libraries from a 700 MB download, the installer is written to a temporary file first, and a machine left with nothing free is a machine that cannot write its own database.",
+    "ollamaInstallGb": 4.5,
+    "ollamaDownloadGb": 0.8,
+    "skillsGb": 0.1,
+    "temporaryGb": 1,
+    "marginGb": 2
+  }
+}

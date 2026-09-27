@@ -113,15 +113,10 @@ export function stateInfo(state: ProjectState): StateInfo {
   return PROJECT_STATES[state];
 }
 
-/** "Today", "yesterday", "3 days ago" — the resolution a person actually wants. */
-export function relativeTime(timestamp: number, now = Date.now()): string {
-  const minutes = Math.round((now - timestamp) / 60_000);
-  if (minutes < 1) return "just now";
-  if (minutes < 60) return `${minutes} minute${minutes === 1 ? "" : "s"} ago`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
-  const days = Math.round(hours / 24);
-  if (days === 1) return "yesterday";
-  if (days < 30) return `${days} days ago`;
-  return new Date(timestamp).toLocaleDateString();
-}
+/* A relative time used to be formatted here, and was removed.
+   ------------------------------------------------------------------
+   Any relative time computed during rendering is a hydration mismatch waiting
+   for a rounding boundary: the server renders "1 minute ago", the browser
+   hydrates a moment later and computes "2 minutes ago", and React reports a
+   text mismatch. `components/LocalTime.tsx` renders these after mounting, which
+   is the only way to be both correct and in the reader's own time zone. */

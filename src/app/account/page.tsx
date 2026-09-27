@@ -10,6 +10,7 @@ import { AppBar, Card } from "@/components/ui";
 import { AccountActions } from "@/components/AccountActions";
 import { DesignEngineCard } from "@/components/DesignEngineCard";
 import { LocalSettingsCard } from "@/components/LocalSettingsCard";
+import { RepairCard } from "@/components/RepairCard";
 
 export const metadata: Metadata = { title: "Profile" };
 
@@ -75,6 +76,11 @@ export default async function AccountPage() {
       </Link>
 
       <DesignEngineCard />
+
+      {/* What is installed, checked live, with a way to repair it. Desktop
+          only: a hosted deployment's components are the operator's business and
+          are provisioned by whatever deployed it, not from a profile screen. */}
+      {isDesktop() && <RepairCard />}
 
       {/* Only the desktop application has keys of its own to hold. */}
       {isDesktop() && <LocalSettingsCard />}

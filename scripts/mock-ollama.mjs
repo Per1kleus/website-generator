@@ -8,13 +8,37 @@
  * shapes and the same NDJSON streaming, so the client code is exercised for
  * real: detection, background pull with progress, and JSON-mode generation.
  *
- *   node scripts/mock-ollama.mjs [port] [--preinstalled]
+ * Failure modes are switchable, because the setup has to be tested against the
+ * ways this actually goes wrong on a user's machine and not only against the
+ * happy path: a daemon that is not answering yet, one that never answers, a
+ * pull that dies partway, and a model that is present but cannot load.
+ *
+ *   node scripts/mock-ollama.mjs [port] [options]
+ *
+ *     --preinstalled        the required model is already there
+ *     --ready-after <ms>    refuse every request until this much time has passed
+ *     --never-ready         answer, but never with a usable body
+ *     --pull-fails          the pull streams an error partway through
+ *     --chat-fails          the model is listed but will not answer
+ *     --model <id>          which model counts as installed
  */
 import { createServer } from "node:http";
 
-const port = Number(process.argv[2] || 11500);
-const preinstalled = process.argv.includes("--preinstalled");
-const MODEL = process.env.WG_OLLAMA_MODEL || "qwen2.5:0.5b";
+const argv = process.argv.slice(2);
+const port = Number(argv[0] || 11500);
+const flag = (name, fallback = null) => {
+  const i = argv.indexOf(`--${name}`);
+  return i > -1 ? argv[i + 1] : fallback;
+};
+const has = (name) => argv.includes(`--${name}`);
+
+const preinstalled = has("preinstalled");
+const MODEL = flag("model") || process.env.WG_OLLAMA_MODEL || "qwen2.5:0.5b";
+const readyAfterMs = Number(flag("ready-after", 0)) || 0;
+const neverReady = has("never-ready");
+const pullFails = has("pull-fails");
+const chatFails = has("chat-fails");
+const startedAt = Date.now();
 
 let installed = preinstalled ? [MODEL] : [];
 
@@ -50,6 +74,30 @@ const server = createServer((req, res) => {
     res.end(typeof body === "string" ? body : JSON.stringify(body));
   };
 
+  /* A daemon that is listening but not serving yet.
+     This is what Ollama looks like for the first seconds after its service
+     starts, and the case a setup that polls once would get wrong. */
+  if (neverReady || (readyAfterMs && Date.now() - startedAt < readyAfterMs)) {
+    return send(503, { error: "server is starting" });
+  }
+
+  // Ollama's own delete endpoint, which is how a person removes a model — and
+  // therefore how a test reproduces "the model was deleted after setup".
+  if (req.method === "DELETE" && req.url?.startsWith("/api/delete")) {
+    let body = "";
+    req.on("data", (c) => (body += c));
+    return req.on("end", () => {
+      let name = MODEL;
+      try {
+        name = JSON.parse(body).model || MODEL;
+      } catch {
+        /* keep the default */
+      }
+      installed = installed.filter((m) => m !== name);
+      send(200, {});
+    });
+  }
+
   if (req.method === "GET" && req.url?.startsWith("/api/tags")) {
     return send(200, {
       models: installed.map((name) => ({ name, model: name, size: 397_000_000 })),
@@ -76,6 +124,14 @@ const server = createServer((req, res) => {
     res.write(JSON.stringify({ status: "pulling manifest" }) + "\n");
     const timer = setInterval(() => {
       sent = Math.min(total, sent + total / 5);
+      // A pull that dies partway, the way a dropped connection does: real
+      // progress first, then an error in the stream rather than a clean end.
+      if (pullFails && sent >= total * 0.4) {
+        clearInterval(timer);
+        res.write(JSON.stringify({ error: "max retries exceeded: connection reset" }) + "\n");
+        res.end();
+        return;
+      }
       res.write(JSON.stringify({ status: "downloading", completed: sent, total }) + "\n");
       if (sent >= total) {
         clearInterval(timer);
@@ -92,6 +148,10 @@ const server = createServer((req, res) => {
     req.on("data", (c) => (body += c));
     req.on("end", () => {
       if (!installed.length) return send(404, { error: `model '${MODEL}' not found` });
+      // Present in the list, but will not load: a corrupted blob, or a machine
+      // without the memory to run it. The setup has to catch this rather than
+      // reporting a download as a working model.
+      if (chatFails) return send(500, { error: "failed to load model" });
       let prompt = "";
       try {
         const parsed = JSON.parse(body);

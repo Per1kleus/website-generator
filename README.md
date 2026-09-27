@@ -629,18 +629,44 @@ its own window and its own process. No browser, no terminal, no localhost, and
 nothing for the user to install first — not Node, not Python, not Ollama.
 
 **First launch** sets the machine up once, behind a native setup screen: it
-inspects the computer (Windows version, CPU, RAM, GPU, VRAM, CUDA, free disk),
-installs UI/UX Pro Max with its own CLI, prepares Ollama if it is missing,
-recommends the smallest local model this machine runs comfortably, downloads it
-after the user agrees — with real byte counts — and verifies that it answers.
-Only then is the installation marked complete.
+prepares its own folders, inspects the computer (Windows version, CPU, RAM, GPU,
+VRAM, CUDA, free disk), installs UI/UX Pro Max with its own CLI, checks there is
+room for the whole job before fetching anything large, prepares Ollama if it is
+missing, recommends the smallest local model this machine runs comfortably,
+downloads it after the user agrees — with real byte counts — and verifies that it
+answers. Only then is the installation marked complete.
 
-**Every launch after that** is a double-click and a window: 1.1 seconds to the
-application, no downloads, no probing, no browser.
+What "required" means lives in **one file**, `desktop/bootstrap/manifest.json`:
+the runtime, every skill with the files that prove it and the call that verifies
+it, the one required model and the hardware ladder, the readiness timeouts, the
+installer's integrity rules, the required directories, the disk budget, and which
+components may be declined. The first-launch bootstrap reads it and so does the
+running server, so there is no second opinion about what a working installation
+consists of — the required model used to be a literal in two places, which is a
+bug with a delay on it.
 
-An interrupted download resumes. A failed step explains itself and offers a
-retry, or continuing without the optional part. An application update never
-re-downloads a model that is already there.
+**Every launch after that** is a double-click and a window: no downloads, no
+probing, no browser. What it does do is cheap and worth doing — a handful of file
+checks and one request to a daemon on the same machine — because "setup is
+complete" is a claim about the computer and not about a file. A model somebody
+deleted reopens setup and is fetched again; a catalogue file that went missing is
+put back; nothing else re-runs.
+
+An interrupted download resumes from where it stopped, because Ollama keeps the
+blobs it already has and nothing here deletes a partial download to start clean.
+A failed step explains itself in a sentence and offers a retry, or continuing
+without the optional part — and a part continued without is **recorded** as
+skipped rather than quietly disabled. An application update never re-downloads a
+model that is already there.
+
+**Repair Installation** lives on the Profile screen. *Check installation* reports
+every component against the machine, loading the model to confirm it answers;
+*Repair installation* provisions only what is missing, removes nothing that
+works, and hands anything needing the launcher to the next launch.
+
+The installer installs the application. Neither Ollama nor the model is inside
+it: that would add gigabytes to every download, including for users who already
+have both, and the packaging suite asserts it.
 
 Full detail — the setup flow, the model ladder, what is and is not installed,
 and the limitations — is in [docs/DESKTOP.md](docs/DESKTOP.md). For using the
@@ -656,8 +682,8 @@ the backend address once, or the build bakes it in.
 npm run build:windows                        # → WebsiteGenerator-Setup.exe
 npm run build:windows:cross                  # the same, built from Linux/macOS
 WG_REMOTE_URL=https://example.com npm run build:android     # → APK
-npm run test:desktop                                        # 55 packaging checks
-npm run test:setup                                          # 40 first-launch checks
+npm run test:desktop                                        # 60 packaging checks
+npm run test:setup                                          # 128 first-launch checks
 ```
 
 Neither artifact contains a secret. The desktop app uses a Google **Desktop
@@ -740,8 +766,8 @@ npm start &
 npm run test:mobile     # 223 checks: the whole product on a phone
 npm run test:design     #  21 checks: the design engine across all its tiers
 npm run test:menu       #  93 checks: the Google Sheets menu pipeline
-npm run test:desktop    #  55 checks: the packaged desktop app
-npm run test:setup      #  40 checks: first launch, second launch, recovery
+npm run test:desktop    #  60 checks: the packaged desktop app
+npm run test:setup      # 128 checks: the whole first-launch flow
 npm run test:gemini     #  75 checks: the hosted model, its contracts and failures
 npm run test:design-systems  #  59 checks: layout, tokens, heuristics, critic
 npm run test:site       # 282 checks: visual QA, SEO and image intelligence
@@ -752,7 +778,7 @@ npm run test:backup     #  95 checks: export, inspect, restore, and what is excl
 npm run test:connect    #  77 checks: client Google connection links
 ```
 
-1,485 checks in all, and CI runs every one of them on every push.
+1,578 checks in all, and CI runs every one of them on every push.
 
 `test:connect` runs two Google accounts against `scripts/mock-google.mjs`,
 because one cannot demonstrate the property that matters: it connects two
@@ -804,12 +830,21 @@ JSON each degrade to the same fallback the application always had.
 
 `test:setup` drives the real first-launch bootstrap the way the Windows shell
 does — spawning it, reading its progress, answering its questions — against a
-stub model host. It covers a first launch, an immediate second launch, a forced
-re-run that reinstalls nothing, a download killed partway and resumed, a step
-that fails and is retried or skipped, and a corrupted state file. It asserts
-that progress is real byte counts, that nothing is downloaded before the user
-chooses, that setup is never marked complete on the strength of a download
-alone, and that the state file holds no secrets.
+stub model host whose failure modes are switchable, because the happy path is
+the one case that was never in doubt. A daemon that is listening but not serving
+yet, one that never serves, a pull that dies partway, a model that is listed but
+will not load, a model somebody deleted afterwards, a catalogue file that went
+missing, a disk with no room, and a record written by an older version are each
+a case rather than a hope. It then starts the built application against a
+recorded installation and exercises the readiness report and Repair Installation
+over HTTP.
+
+Three properties it exists to defend. Progress is real byte counts, never a
+timer. Nothing is downloaded that is already installed — the second launch takes
+milliseconds and touches the network not at all. And a component is ready only
+once its underlying resource has been checked: the design catalogue is asked for
+a design system, the model is loaded and asked to answer, and setup is never
+marked complete on the strength of a download finishing.
 
 The harness drives the entire builder workflow at 1440×900 — including
 the logo upload, a two-language project, per-language editing, adding and

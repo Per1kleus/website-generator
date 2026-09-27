@@ -1,4 +1,5 @@
-import { relativeTime, type StateInfo } from "@/lib/project-status";
+import { type StateInfo } from "@/lib/project-status";
+import { LocalTime } from "./LocalTime";
 
 /**
  * The professional summary at the top of a project.
@@ -51,7 +52,9 @@ export function ProjectOverview({
         >
           {state.label}
         </span>
-        <span className="text-xs text-muted">Updated {relativeTime(updatedAt)}</span>
+        <span className="text-xs text-muted">
+          Updated <LocalTime ts={updatedAt} mode="relative" />
+        </span>
       </div>
 
       <p className="mt-1.5 text-xs text-muted">{state.hint}</p>

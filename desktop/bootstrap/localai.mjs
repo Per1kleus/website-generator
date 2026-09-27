@@ -16,7 +16,9 @@
  *   or skipped rather than trapping the user in a setup screen.
  */
 import { execFile, spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { promisify } from "node:util";
+import { installerSpec, ollamaHost, readiness } from "./manifest.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -25,7 +27,7 @@ export const DEFAULT_HOST = "http://127.0.0.1:11434";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function host() {
-  return (process.env.OLLAMA_HOST || DEFAULT_HOST).replace(/\/+$/, "");
+  return ollamaHost();
 }
 
 /** Is the daemon answering? Never throws. */
@@ -33,6 +35,74 @@ export async function daemonUp(timeoutMs = 1500) {
   try {
     const res = await fetch(`${host()}/api/tags`, { signal: AbortSignal.timeout(timeoutMs) });
     return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Wait for the daemon, backing off.
+ *
+ * Ollama's Windows installer starts a service, and "installed" and "answering"
+ * are separated by anything from a second to most of a minute on a cold
+ * machine. Polling hard for that whole time is wasteful and polling once is
+ * wrong, so the interval grows from a few hundred milliseconds to a few seconds
+ * and the whole wait is bounded by the manifest's timeout.
+ *
+ * Returns false rather than throwing when it never answers: that is a reportable
+ * outcome with a retry, not an exception.
+ */
+export async function waitForDaemon({ timeoutMs = readiness().startTimeoutMs, onWait = null } = {}) {
+  const { pollInitialMs, pollMaxMs } = readiness();
+  const deadline = Date.now() + timeoutMs;
+  let wait = pollInitialMs;
+  for (let attempt = 1; ; attempt += 1) {
+    if (await daemonUp()) return true;
+    if (Date.now() >= deadline) return false;
+    if (onWait) onWait({ attempt, waitedMs: wait });
+    await sleep(Math.min(wait, Math.max(0, deadline - Date.now())));
+    wait = Math.min(Math.round(wait * 1.6), pollMaxMs);
+  }
+}
+
+/**
+ * Is one exact model installed?
+ *
+ * Three answers, and the third matters: `null` means the daemon could not be
+ * reached, which is not the same as the model being absent. A launch that
+ * treated an unreachable daemon as a missing model would reopen setup on every
+ * machine where Ollama simply had not started yet.
+ */
+export async function modelPresent(id, timeoutMs = 1500) {
+  try {
+    const res = await fetch(`${host()}/api/tags`, { signal: AbortSignal.timeout(timeoutMs) });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const names = (data.models ?? []).map((m) => m.name || m.model).filter(Boolean);
+    return hasModel(names, id);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Can anything be downloaded at all?
+ *
+ * Asked before a large download starts, so "no internet" is reported as itself
+ * rather than as a mysterious failure twenty seconds into a model pull. A HEAD
+ * against the host the installer comes from, because that is the host that has
+ * to be reachable; a redirect or any HTTP answer counts, since the question is
+ * connectivity and not the state of someone's CDN.
+ */
+export async function internetReachable(timeoutMs = 6000) {
+  const url = installerSpec().windowsUrl;
+  try {
+    const res = await fetch(url, {
+      method: "HEAD",
+      redirect: "follow",
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    return res.status > 0;
   } catch {
     return false;
   }
@@ -77,7 +147,7 @@ export async function binaryPresent() {
  * rather than to the application: quitting the app should not stop a service
  * the user may also use from a terminal.
  */
-export async function startDaemon(timeoutMs = 20000) {
+export async function startDaemon({ timeoutMs = readiness().startTimeoutMs, onWait = null } = {}) {
   if (await daemonUp()) return true;
   if (!(await binaryPresent())) return false;
   try {
@@ -90,12 +160,7 @@ export async function startDaemon(timeoutMs = 20000) {
   } catch {
     return false;
   }
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (await daemonUp()) return true;
-    await sleep(500);
-  }
-  return false;
+  return waitForDaemon({ timeoutMs, onWait });
 }
 
 async function wingetAvailable() {
@@ -142,33 +207,106 @@ export async function installRuntime(report) {
     }
   }
 
-  report({
-    detail:
-      "Opening the Ollama installer. Accept its prompts, then this setup continues automatically.",
-  });
   try {
-    const { tmpdir } = await import("node:os");
-    const { writeFile } = await import("node:fs/promises");
-    const path = (await import("node:path")).default;
-    const res = await fetch("https://ollama.com/download/OllamaSetup.exe", {
-      redirect: "follow",
+    report({ detail: "Downloading the Ollama installer…" });
+    const download = await fetchInstaller(report);
+    if (!download.ok) return { ok: false, reason: download.reason };
+
+    report({
+      detail:
+        "Opening the Ollama installer. Accept its prompts, then this setup continues automatically.",
     });
-    if (!res.ok) throw new Error(`download failed: ${res.status}`);
-    const file = path.join(tmpdir(), "OllamaSetup.exe");
-    await writeFile(file, Buffer.from(await res.arrayBuffer()));
-    const child = spawn(file, [], { detached: true, stdio: "ignore" });
+    const child = spawn(download.file, [], { detached: true, stdio: "ignore" });
     child.unref();
+
     // The user is now driving the vendor's installer; wait for the daemon it
     // starts rather than assuming a duration.
-    const deadline = Date.now() + 10 * 60_000;
-    while (Date.now() < deadline) {
-      if (await daemonUp()) return { ok: true, via: "installer" };
-      await sleep(2000);
-    }
-    return { ok: false, reason: "installer-not-finished" };
+    const ready = await waitForDaemon({
+      timeoutMs: readiness().installTimeoutMs,
+      onWait: () => report({ detail: "Waiting for Ollama to finish installing…" }),
+    });
+    return ready ? { ok: true, via: "installer" } : { ok: false, reason: "installer-not-finished" };
   } catch (err) {
     return { ok: false, reason: short(err) };
   }
+}
+
+/**
+ * Download the vendor's installer, and prove it is the installer.
+ *
+ * This file is about to be executed on the user's machine. A truncated
+ * download, an interception, or a captive portal's login page served with a 200
+ * would otherwise all be run as an executable, so every one of them is checked
+ * for before anything is spawned:
+ *
+ *   the bytes received must match the length the server declared;
+ *   the size must be plausible for this installer;
+ *   the file must actually start with the Windows executable signature;
+ *   and when an operator has pinned a digest, it must match exactly.
+ *
+ * Ollama publishes no stable per-release digest at a floating download URL, so
+ * a pin cannot be shipped in the manifest honestly. What can be shipped is
+ * every check that does not require one — and `WG_OLLAMA_SETUP_SHA256` for an
+ * operator who has verified a specific build and wants it enforced.
+ *
+ * A failed check deletes the file. Leaving a rejected executable in the
+ * temporary directory would invite exactly the mistake this function exists to
+ * prevent.
+ */
+async function fetchInstaller(report) {
+  const spec = installerSpec();
+  const { tmpdir } = await import("node:os");
+  const { writeFile } = await import("node:fs/promises");
+  const path = (await import("node:path")).default;
+
+  const res = await fetch(spec.windowsUrl, { redirect: "follow" });
+  if (!res.ok) return { ok: false, reason: `download failed (${res.status})` };
+
+  const declared = Number(res.headers.get("content-length") ?? 0);
+  const bytes = Buffer.from(await res.arrayBuffer());
+
+  const verdict = checkInstaller(bytes, { declared });
+  if (!verdict.ok) {
+    // Nothing is written to disk. Leaving a rejected executable in the
+    // temporary directory would invite exactly the mistake this prevents.
+    console.error(`[setup] refused the Ollama installer: ${verdict.reason}`);
+    return { ok: false, reason: verdict.reason };
+  }
+
+  report({
+    detail: verdict.pinned
+      ? "Installer downloaded and its checksum verified."
+      : "Installer downloaded and checked.",
+  });
+
+  const file = path.join(tmpdir(), "OllamaSetup.exe");
+  await writeFile(file, bytes);
+  return { ok: true, file, digest: verdict.digest, bytes: bytes.byteLength };
+}
+
+/**
+ * Is this actually the installer?
+ *
+ * Pure, and exported, so every rejection path is tested rather than argued
+ * about. `declared` is the Content-Length the server sent; 0 means it sent none.
+ */
+export function checkInstaller(bytes, { declared = 0, spec = installerSpec(), env = process.env } = {}) {
+  if (declared > 0 && bytes.byteLength !== declared) {
+    return { ok: false, reason: "the download was incomplete" };
+  }
+  if (bytes.byteLength < spec.minBytes || bytes.byteLength > spec.maxBytes) {
+    return { ok: false, reason: "the download was not the expected size" };
+  }
+  if (bytes.subarray(0, spec.expectHeader.length).toString("latin1") !== spec.expectHeader) {
+    return { ok: false, reason: "the download was not a Windows installer" };
+  }
+
+  const digest = createHash("sha256").update(bytes).digest("hex");
+  const pinned = (env[spec.sha256Env] ?? "").trim().toLowerCase();
+  if (pinned && pinned !== digest) {
+    return { ok: false, reason: "the download did not match the expected checksum" };
+  }
+  return { ok: true, digest, pinned: Boolean(pinned) };
 }
 
 function short(err) {
@@ -239,9 +377,16 @@ function gb(bytes) {
 
 /**
  * Prove the model works, rather than trusting that the download finished.
- * A model that is present but cannot answer is not a completed setup.
+ *
+ * A model that is present but cannot answer is not a completed setup — a pull
+ * can finish against a corrupted blob, and a machine can be short of the memory
+ * the model needs to load at all. So the check loads it and asks it something.
+ *
+ * Deliberately minimal and deliberately not the user's content: a fixed
+ * instruction, temperature zero, a 64-token ceiling. It is a health check, not
+ * a generation, and nothing about anybody's business is sent to it.
  */
-export async function verifyModel(id, timeoutMs = 120_000) {
+export async function verifyModel(id, timeoutMs = readiness().verifyTimeoutMs) {
   try {
     const res = await fetch(`${host()}/api/chat`, {
       method: "POST",
