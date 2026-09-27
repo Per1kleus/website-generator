@@ -18,7 +18,25 @@ New to the application, or not a developer? Start with
 first-launch setup, building a first website, and building a digital menu from
 a Google Sheet, in plain English.
 
-To run it from source:
+**Installing it without a terminal.** Double-click one file:
+
+| You are on | Double-click |
+| --- | --- |
+| Windows | `install-windows.cmd` |
+| Linux or macOS | `install.sh` |
+
+It checks for Node (and offers to install it with winget on Windows), installs
+the dependencies, builds the application, runs the same first-launch setup the
+packaged `.exe` runs, adds a Start Menu and desktop shortcut, and offers to
+start it. Afterwards, `start-windows.cmd` or `start.sh` opens it again.
+
+It installs into the directory the packaged application uses, so installing from
+source and installing from the `.exe` are the same installation rather than two
+that do not know about each other. Everything it does is
+`scripts/install-app.mjs`, which is readable and which drives the existing
+bootstrap and sidecar rather than reimplementing either.
+
+To run it from source with a terminal:
 
 ```bash
 npm install
@@ -636,7 +654,8 @@ missing, recommends the smallest local model this machine runs comfortably,
 downloads it after the user agrees — with real byte counts — and verifies that it
 answers. Only then is the installation marked complete.
 
-What "required" means lives in **one file**, `desktop/bootstrap/manifest.json`:
+What "required" means lives in **one file**, `setup-manifest.json` at the
+repository root:
 the runtime, every skill with the files that prove it and the call that verifies
 it, the one required model and the hardware ladder, the readiness timeouts, the
 installer's integrity rules, the required directories, the disk budget, and which
@@ -682,8 +701,8 @@ the backend address once, or the build bakes it in.
 npm run build:windows                        # → WebsiteGenerator-Setup.exe
 npm run build:windows:cross                  # the same, built from Linux/macOS
 WG_REMOTE_URL=https://example.com npm run build:android     # → APK
-npm run test:desktop                                        # 60 packaging checks
-npm run test:setup                                          # 128 first-launch checks
+npm run test:desktop                                        # 79 packaging checks
+npm run test:setup                                          # 129 first-launch checks
 ```
 
 Neither artifact contains a secret. The desktop app uses a Google **Desktop
@@ -766,8 +785,8 @@ npm start &
 npm run test:mobile     # 223 checks: the whole product on a phone
 npm run test:design     #  21 checks: the design engine across all its tiers
 npm run test:menu       #  93 checks: the Google Sheets menu pipeline
-npm run test:desktop    #  60 checks: the packaged desktop app
-npm run test:setup      # 128 checks: the whole first-launch flow
+npm run test:desktop    #  79 checks: the packaged desktop app and the installers
+npm run test:setup      # 129 checks: the whole first-launch flow
 npm run test:gemini     #  75 checks: the hosted model, its contracts and failures
 npm run test:design-systems  #  59 checks: layout, tokens, heuristics, critic
 npm run test:site       # 282 checks: visual QA, SEO and image intelligence
@@ -778,7 +797,7 @@ npm run test:backup     #  95 checks: export, inspect, restore, and what is excl
 npm run test:connect    #  77 checks: client Google connection links
 ```
 
-1,578 checks in all, and CI runs every one of them on every push.
+1,598 checks in all, and CI runs every one of them on every push.
 
 `test:connect` runs two Google accounts against `scripts/mock-google.mjs`,
 because one cannot demonstrate the property that matters: it connects two

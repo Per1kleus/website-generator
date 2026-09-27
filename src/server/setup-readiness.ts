@@ -21,7 +21,7 @@ const execFileAsync = promisify(execFile);
  * telling the user what is currently true, and repairing what has gone missing
  * without making them reinstall the application.
  *
- * Both read the same `desktop/bootstrap/manifest.json`, so there is one
+ * Both read the same `setup-manifest.json`, so there is one
  * definition of "required" and not two that drift.
  *
  * Deliberately not an import of the bootstrap's own modules: those are plain

@@ -1,13 +1,20 @@
 import "server-only";
-import manifest from "../../desktop/bootstrap/manifest.json";
+import { MANIFEST as manifest } from "./setup-manifest.data";
 
 /**
  * The setup manifest, as the running server sees it.
  *
- * The same `desktop/bootstrap/manifest.json` the first-launch bootstrap reads,
- * imported statically so the bundler inlines it — which means this works
- * identically in development, in the standalone production server and inside
- * the packaged desktop application, with no path to resolve at runtime.
+ * The values come from `setup-manifest.json`, through the generated module
+ * beside this one — so they are inlined at build time and there is no path to
+ * resolve at runtime, in development, in the standalone production server or
+ * inside the packaged desktop application alike.
+ *
+ * The generated step is not ceremony. Importing the JSON directly makes Next's
+ * output tracing follow the import out of `src/` and carry the file's
+ * neighbours into the standalone build: from `desktop/` that swept in the Rust
+ * build directory, and from the repository root the documentation and the
+ * screenshots — a 7.5 GB server either way. `scripts/setup-qa.mjs` fails if the
+ * generated module and the JSON ever disagree.
  *
  * The reason for sharing it rather than restating it: the required model used
  * to be written out twice, once here and once in the bootstrap's model ladder.

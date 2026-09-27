@@ -1,0 +1,13 @@
+# Keep the click-to-run Windows script as CRLF.
+#
+# cmd.exe is mostly forgiving about line endings, but not entirely — a label or
+# a `goto` in a file with bare LF endings can be misread, and this is a file
+# whose whole job is to work when a person double-clicks it on a machine nobody
+# here can test. Git is told plainly rather than left to guess from a core
+# setting that differs per checkout.
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# And the shell scripts as LF, for the same reason in the other direction: a
+# CRLF shebang line makes the interpreter "not found".
+*.sh text eol=lf

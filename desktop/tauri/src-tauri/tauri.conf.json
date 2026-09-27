@@ -31,7 +31,8 @@
       "../../../.next/standalone/": "server/",
       "../../sidecar/launch.mjs": "sidecar/launch.mjs",
       "../../bootstrap/": "bootstrap/",
-      "../npm/": "npm/"
+      "../npm/": "npm/",
+      "../../../setup-manifest.json": "setup-manifest.json"
     },
     "externalBin": [
       "binaries/wg-node"

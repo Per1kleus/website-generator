@@ -39,10 +39,29 @@ own taskbar entry and icon, and a single-instance guard so a second double-click
 focuses the window that is already open rather than starting a second server
 against the same database.
 
+## Two ways in
+
+| Given to a person as | They double-click | What drives it |
+| --- | --- | --- |
+| A finished application | `WebsiteGenerator-Setup.exe` | the NSIS installer, then the Tauri shell |
+| The source folder | `install-windows.cmd` (or `install.sh`) | `scripts/install-app.mjs` |
+
+Both end at the same place, and deliberately so: the click-to-run script drives
+`desktop/bootstrap/run.mjs` and `desktop/sidecar/launch.mjs` — the same
+first-launch system and the same launcher the packaged application uses — and
+installs into the same data directory. It is a second *front end*, not a second
+installer; until it existed, the only thing that could drive the bootstrap was
+the Rust shell, which you cannot run without building it.
+
+The difference is what a person needs beforehand: the `.exe` needs nothing at
+all, and the script needs Node (which it will install with winget if it is
+missing).
+
 ## First launch
 
 The setup screen is native to the application — a window with steps and
-progress, never a console.
+progress, never a console. The click-to-run script shows the same steps as
+console lines, including the real byte counts.
 
 ```
 Application launched
@@ -86,7 +105,8 @@ window.
 
 ### One manifest
 
-`desktop/bootstrap/manifest.json` is what a complete installation consists of,
+`setup-manifest.json`, at the repository root, is what a complete installation
+consists of,
 and it is the only place that says so. The bootstrap reads it; so does the
 running server, through `src/server/setup-manifest.ts`.
 
@@ -293,13 +313,13 @@ builds on `windows-latest`, and that is the artefact to ship.
    development container this was written in has no Windows machine to install
    on, so what can be stated is exactly what was observed:
 
-   - `WebsiteGenerator-Setup.exe` was produced, 48.3 MB, and is a real NSIS
+   - `WebsiteGenerator-Setup.exe` was produced, 48.8 MB, and is a real NSIS
      self-extracting installer (`PE32 executable (GUI) … Nullsoft Installer`).
-   - It carries 4,146 files, 187.7 MB uncompressed: the shell
+   - It carries 4,597 files, 191.1 MB uncompressed: the shell
      (`PE32+ executable (GUI) x86-64, for MS Windows`), `WebView2Loader.dll`,
      the Node runtime as `wg-node.exe`, the standalone server, the sidecar
-     launcher, the bootstrap, npm, and `uninstall.exe`. No `data/` directory
-     and no `.env` file are in it.
+     launcher, the bootstrap with its manifest, npm, and `uninstall.exe`. No
+     `data/` directory and no `.env` file are in it.
    - The generated `installer.nsi` was read rather than assumed:
      `RequestExecutionLevel user`, install into `$LOCALAPPDATA\Website Generator`,
      a Start Menu shortcut, a desktop shortcut offered on the finish page, a
@@ -336,7 +356,13 @@ builds on `windows-latest`, and that is the artefact to ship.
 5. **Auto-update is not wired up.** A new version means a new installer. The
    state file's revision field is what will make an update skip work that is
    already done.
-6. **A real Windows first launch has not been performed.** Everything in "First
+6. **The click-to-run scripts have not been run on Windows either.**
+   `install-windows.cmd` and `scripts/install-app.mjs` were exercised on Linux —
+   a full install, a second run that installed nothing, the bootstrap driven
+   through its NDJSON, and the application started through the sidecar. What is
+   unverified on Windows specifically is `cmd.exe`'s handling of the batch file,
+   the winget path for installing Node, and the PowerShell shortcut creation.
+7. **A real Windows first launch has not been performed.** Everything in "First
    launch" above is implemented and tested headlessly through the same bootstrap
    the shell spawns, including the failure and recovery paths. Installing the
    `.exe` on Windows, watching the setup screen, letting Ollama's own installer

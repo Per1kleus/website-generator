@@ -16,7 +16,7 @@
  */
 import { spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -57,6 +57,26 @@ function stop(child) {
 }
 
 const dataDir = mkdtempSync(path.join(tmpdir(), "wg-desktop-"));
+
+/** Size on disk, in megabytes, without shelling out to du. */
+function directorySizeMb(dir) {
+  let bytes = 0;
+  const walk = (current) => {
+    for (const name of readdirSync(current, { withFileTypes: true })) {
+      const entry = path.join(current, name.name);
+      if (name.isDirectory()) walk(entry);
+      else if (name.isFile()) {
+        try {
+          bytes += statSync(entry).size;
+        } catch {
+          /* vanished between listing and measuring */
+        }
+      }
+    }
+  };
+  walk(dir);
+  return bytes / 1e6;
+}
 
 /**
  * Next leaves .next/static and public/ for whoever packages the app, so the
@@ -384,12 +404,14 @@ try {
   record("the sidecar launcher and the first-launch bootstrap ship with it",
     resources.includes("sidecar/launch.mjs") && resources.includes("bootstrap/"));
   record("the setup manifest travels with the bootstrap that reads it",
-    existsSync("desktop/bootstrap/manifest.json") && resources.includes("bootstrap/"));
+    existsSync("setup-manifest.json") &&
+      resources.includes("bootstrap/") &&
+      resources.includes("setup-manifest.json"));
 
   /* The installer installs the application; the first launch fetches the large
      assets. A model bundled into the .exe would add hundreds of megabytes to
      every download, including for the users who already have it. */
-  const manifest = JSON.parse(readFileSync("desktop/bootstrap/manifest.json", "utf8"));
+  const manifest = JSON.parse(readFileSync("setup-manifest.json", "utf8"));
   record("no AI model is bundled into the installer",
     !Object.keys(conf.bundle?.resources ?? {}).some((k) => /\.gguf|models?\//i.test(k)) &&
       !existsSync(path.join("desktop", "tauri", "models")));
@@ -401,6 +423,71 @@ try {
       typeof manifest.ai.installer.windowsUrl === "string");
   record("the installer's own download is verified before it is run",
     manifest.ai.installer.expectHeader === "MZ" && manifest.ai.installer.minBytes > 0);
+
+  /* ==================================================================
+     What the standalone server carries
+     ================================================================== */
+  console.log("\n=== The bundled server carries only the server ===\n");
+
+  const standaloneRoot = path.join(process.cwd(), ".next", "standalone");
+  const carried = readdirSync(standaloneRoot);
+  record("the Rust build directory is not inside the bundled server",
+    !existsSync(path.join(standaloneRoot, "desktop")),
+    carried.join(", "));
+  record("nor the documentation, screenshots or build scripts",
+    !["docs", "qa-screenshots", "scripts", "mobile"].some((d) => carried.includes(d)),
+    carried.filter((d) => ["docs", "qa-screenshots", "scripts", "mobile"].includes(d)).join(", ") || "none");
+  record("nor the click-to-run installers it is not part of",
+    !carried.some((f) => /^install|^start\.sh$/.test(f)));
+  record("the design catalogue it reads at runtime IS inside it",
+    existsSync(path.join(standaloneRoot, "vendor", "ui-ux-pro-max", "scripts", "search.py")));
+
+  /* An upper bound rather than an exact figure: the point is that a packaging
+     run cannot trace the previous run's output, which is how this became 7.5 GB
+     of build cache wrapped around a 40 MB server. */
+  const standaloneMb = directorySizeMb(standaloneRoot);
+  record("the bundled server is a sane size",
+    standaloneMb < 400, `${standaloneMb.toFixed(0)} MB`);
+
+  /* ==================================================================
+     Click to install
+     ================================================================== */
+  console.log("\n=== Click to install ===\n");
+
+  const winInstaller = readFileSync("install-windows.cmd", "utf8");
+  record("there is a Windows script a person can double-click",
+    existsSync("install-windows.cmd"));
+  record("it is a batch file with Windows line endings",
+    winInstaller.startsWith("@echo off") && winInstaller.includes("\r\n"));
+  record("it works from wherever the folder is",
+    winInstaller.includes('cd /d "%~dp0"'));
+  record("it refuses to run outside the application folder rather than guessing",
+    winInstaller.includes('if not exist "package.json"'));
+  record("it checks for Node, and offers to install it with winget",
+    winInstaller.includes("where node") && winInstaller.includes("OpenJS.NodeJS.LTS"));
+  record("the window stays open long enough to read",
+    /\npause/.test(winInstaller));
+  record("it delegates to one readable script rather than reimplementing setup",
+    winInstaller.includes("scripts\\install-app.mjs"));
+
+  const shInstaller = readFileSync("install.sh", "utf8");
+  record("there is a shell script for Linux and macOS",
+    shInstaller.includes("scripts/install-app.mjs") && existsSync("start.sh"));
+  record("both shell scripts are executable, so a file manager will run them",
+    (statSync("install.sh").mode & 0o111) !== 0 && (statSync("start.sh").mode & 0o111) !== 0);
+
+  const engine = readFileSync("scripts/install-app.mjs", "utf8");
+  record("the installer drives the existing first-launch bootstrap",
+    engine.includes('"bootstrap", "run.mjs"') || engine.includes("desktop/bootstrap/run.mjs") ||
+      engine.includes('"desktop", "bootstrap", "run.mjs"'));
+  record("...and starts the application through the existing sidecar",
+    engine.includes('"sidecar", "launch.mjs"') && engine.includes("WG_READY"));
+  record("it installs into the same folder the packaged application uses",
+    engine.includes("app.websitegenerator.desktop"));
+  record("no second provisioning system was written",
+    !/api\/pull|OllamaSetup|npm install ui-ux-pro-max/.test(engine));
+  record("nothing in the click-to-run path names a secret",
+    !/api[_-]?key|client_secret|password/i.test(winInstaller + shInstaller + engine));
   record("the Node runtime ships as an external binary, so the user installs nothing",
     (conf.bundle?.externalBin ?? []).includes("binaries/wg-node"));
 

@@ -81,10 +81,34 @@ them.
 **Required**
 
 - A Windows computer (Windows 10 or later).
-- The Website Generator installer, which you run once.
+- One of these, depending on what you were given:
+  - **`WebsiteGenerator-Setup.exe`** — the installer. Double-click it; that is
+    the whole job. Skip to section 4.
+  - **the application folder** (the source) — double-click
+    **`install-windows.cmd`** inside it. On a Mac or Linux computer,
+    double-click **`install.sh`**.
 
 That is all. With nothing else, you can create projects and publish real
 websites today.
+
+### If you were given the folder rather than the installer
+
+Double-click **`install-windows.cmd`**. A black window opens and tells you what
+it is doing. It:
+
+- checks whether Node.js is on your computer, and offers to install it for you
+  if it is not,
+- installs the application's own pieces,
+- runs exactly the same first-time setup described in section 4,
+- adds **Website Generator** to your Start Menu and your desktop,
+- asks whether you want to start it now.
+
+It takes a few minutes the first time. Afterwards, open the app from the Start
+Menu or your desktop, or double-click **`start-windows.cmd`**.
+
+Keep the window open while it works. If anything goes wrong it says so in plain
+words and nothing is lost — double-click the file again and it carries on from
+where it stopped.
 
 **Optional, and only if you want the extra features**
 
@@ -430,8 +454,24 @@ this — the app falls back to writing the site from your own inputs.
 
 **"Ollama is not running" on the Profile screen**
 The local AI isn't installed or isn't started. It is optional: designs still
-come from the catalogue. To add it, install Ollama from
-<https://ollama.com> and reopen the app.
+come from the catalogue. To add it, go to **Profile → Installation → Repair
+installation**, or install Ollama from <https://ollama.com> and reopen the app.
+
+**Something that used to work has stopped**
+**Profile → Installation** shows every part of the app and whether it is
+actually working — it loads the local AI and asks it a question rather than
+assuming. **Repair installation** puts back only what is missing. It never
+removes anything that is working and never downloads anything you already have.
+
+**The black window closed and nothing happened** *(installing from the folder)*
+Double-click **`install-windows.cmd`** again. Nothing is lost, and it carries on
+from where it stopped. If it closes instantly, the folder is probably in a place
+Windows will not let it write to — move the whole folder to your Documents and
+try again.
+
+**"Node.js is needed and was not found"** *(installing from the folder)*
+Say yes when it offers to install Node.js for you. If it cannot, get the LTS
+version from <https://nodejs.org>, then double-click the file again.
 
 **Google won't connect / the spreadsheet won't open**
 - Make sure you're signing in with the Google account that owns the

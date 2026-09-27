@@ -77,11 +77,47 @@ can drop on a CDN.
 
 ### A1.2 Installing
 
+Three ways in, for three different people.
+
+**A person who should not have to use a terminal** double-clicks one file:
+
+| Platform | File |
+| --- | --- |
+| Windows | `install-windows.cmd` |
+| Linux, macOS | `install.sh` |
+
+It checks for Node — offering to install it with winget on Windows — installs
+the dependencies, builds the application, runs the first-launch setup described
+in [A1.8](#a18-first-launch-of-the-windows-desktop-application), adds a Start
+Menu and desktop shortcut, and offers to start it. `start-windows.cmd` and
+`start.sh` open it again afterwards. Everything it does is
+`scripts/install-app.mjs`: it drives the existing bootstrap and the existing
+sidecar, so there is no second provisioning path to keep in step.
+
+It installs into the same directory the packaged application uses
+(`%LOCALAPPDATA%\app.websitegenerator.desktop` on Windows), so installing from
+source and installing from the `.exe` are one installation, sharing their setup,
+database and projects.
+
+Useful flags, for a scripted install:
+
+```
+node scripts/install-app.mjs --yes --no-start    take every default, do not launch
+node scripts/install-app.mjs --repair            re-provision what is missing
+node scripts/install-app.mjs --rebuild           rebuild the server as well
+node scripts/install-app.mjs --start             start an installation that exists
+```
+
+**A person receiving a finished application** gets `WebsiteGenerator-Setup.exe`
+(A5 and `docs/DESKTOP.md`). No Node, no source, no terminal.
+
+**A developer** uses the terminal:
+
 ```bash
 git clone <your repository url>
 cd website-generator
 npm install          # runs scripts/setup.mjs afterwards, via postinstall
-npm run build
+npm run build        # runs scripts/gen-setup-manifest.mjs first, via prebuild
 npm start            # or: npm run dev
 ```
 
@@ -101,6 +137,15 @@ script if in doubt; it is short. It:
 > step it performs is optional — the application generates websites without
 > any of it. Do not read a clean `npm install` as proof that Ollama or Python
 > are present; read the script's own output.
+
+`npm run build` triggers `prebuild` → `node scripts/gen-setup-manifest.mjs`,
+which writes `src/server/setup-manifest.data.ts` from `setup-manifest.json`. The
+server reads the generated module rather than the JSON because Next's output
+tracing follows an import out of `src/` by carrying the file's neighbours into
+the standalone build — from `desktop/` that meant the Rust build directory, and a
+7.5 GB server. The generated file is committed, and `npm run test:setup` fails if
+it and the JSON disagree, so "one source of truth" is enforced rather than
+merely intended. To regenerate it by hand: `npm run manifest`.
 
 ### A1.4 What happens on first launch (hosted or from source)
 
@@ -241,7 +286,8 @@ checks the produced file for credential-shaped strings.
 
 ### A1.9 The one authoritative manifest
 
-`desktop/bootstrap/manifest.json` is what this application considers mandatory.
+`setup-manifest.json`, at the repository root, is what this application
+considers mandatory.
 It is read by the first-launch bootstrap **and** by the running server
 (`src/server/setup-manifest.ts` imports it), so there is one definition of
 "required" rather than two that drift:
@@ -1347,7 +1393,7 @@ npm run test:design         # 21
 npm run test:menu           # 93
 npm run test:gemini         # 75
 npm run test:setup          # 128
-npm run test:desktop        # 60
+npm run test:desktop        # 79
 npm run test:github         # 175
 npm run test:backup         # 95
 npm run test:connect        # 77
@@ -1358,7 +1404,7 @@ npm run test:studio         # 230
 npm run test:mobile         # 223
 ```
 
-CI runs all of them on every push. **1,578 checks in total.**
+CI runs all of them on every push. **1,598 checks in total.**
 
 `test:setup` drives `desktop/bootstrap/run.mjs` exactly as the Tauri shell does
 — spawning it, reading its NDJSON, answering its questions — against
@@ -2134,6 +2180,7 @@ Use this as a sign-off sheet, once per delivered website.
 **Desktop first launch** *(if the client runs the application)*
 
 - [ ] `npm run test:setup` clean, `npm run test:desktop` clean
+- [ ] The client was given either the `.exe` or the folder, and told which file to double-click
 - [ ] A real fresh-install first launch performed on Windows at least once
 - [ ] Profile → Installation reports every component working after handover
 - [ ] The second launch is immediate, with nothing downloaded
@@ -2254,7 +2301,9 @@ written. What follows is what that audit found, including the gaps.
 | What the client's page shows and never shows | `src/app/connect/[token]/page.tsx`, `src/components/ClientConnectScreen.tsx` |
 | Drive folder file-name resolution | `findInFolder` in `src/server/google/api.ts`, `resolveImage` in `src/server/menu/drive-images.ts` |
 | First-launch sequence, resume, repair | `desktop/bootstrap/run.mjs`, `state.mjs` |
-| What a complete installation consists of | `desktop/bootstrap/manifest.json` |
+| What a complete installation consists of | `setup-manifest.json` |
+| The click-to-run installer and launcher | `install-windows.cmd`, `install.sh`, `start.sh`, `scripts/install-app.mjs` |
+| What the bundled server carries, and does not | `outputFileTracingExcludes` in `next.config.ts`, asserted by `npm run test:desktop` |
 | The required model, in one place | `ai.requiredModel` in the manifest, read by `src/server/setup-manifest.ts` and `desktop/bootstrap/manifest.mjs` |
 | Skill files, readability and the loader check | `requiredFiles` and `verify` in the manifest, `desktop/bootstrap/uiux.mjs`, `src/server/setup-readiness.ts` |
 | Ollama detection, readiness polling and installer integrity | `desktop/bootstrap/localai.mjs` |
@@ -2280,6 +2329,12 @@ written. What follows is what that audit found, including the gaps.
   Ollama for a machine that needs an administrator; it says so.
 - No AI model or Ollama runtime inside the installer. Both are first-launch
   downloads, and the packaging suite asserts it.
+- The click-to-run script is not a second installer. It drives the existing
+  bootstrap and the existing sidecar, installs into the same data directory as
+  the packaged application, and the packaging suite fails if it ever grows its
+  own model download or its own skill install.
+- No code signing. The Windows installer is unsigned, so SmartScreen warns until
+  a certificate is applied.
 - No automatic DNS configuration. No DNS provider is connected and none can be.
 - No domain registration or purchase.
 - No certificate issuance — GitHub Pages does that.
@@ -2317,6 +2372,12 @@ written. What follows is what that audit found, including the gaps.
   in this environment.** A4.10 says what single real run to do before a first
   handover, and this guide does not claim that run has been performed.
 
+- `WebsiteGenerator-Setup.exe` was produced from this source and inspected — a
+  real NSIS self-extracting installer carrying the server, the Node runtime, the
+  bootstrap, the sidecar and the manifest — but it was **cross-compiled from
+  Linux against the `windows-gnu` target and has never been run.** The supported
+  build is `.github/workflows/desktop-release.yml` on `windows-latest` with
+  MSVC; `docs/DESKTOP.md` states exactly what was and was not observed.
 - The first-launch flow is verified end to end against `scripts/mock-ollama.mjs`,
   including a daemon that is not ready yet, one that never becomes ready, an
   interrupted pull, a failed pull, a model that will not load, a deleted model, a

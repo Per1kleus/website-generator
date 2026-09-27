@@ -19,7 +19,7 @@
  *
  *   node scripts/setup-qa.mjs
  */
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
   existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync,
 } from "node:fs";
@@ -171,7 +171,7 @@ try {
   );
   record(
     "the server reads the same manifest file",
-    JSON.parse(readFileSync("desktop/bootstrap/manifest.json", "utf8")).ai.requiredModel ===
+    JSON.parse(readFileSync("setup-manifest.json", "utf8")).ai.requiredModel ===
       manifest.MANIFEST.ai.requiredModel,
   );
   record(
@@ -181,6 +181,18 @@ try {
         .map((f) => readFileSync(f, "utf8"))
         .join("\n"),
     ),
+  );
+  /* The server cannot import the JSON — Next's tracing would carry the file's
+     neighbours into the standalone build — so the values are generated into a
+     module inside src/. That is only "one source of truth" if drift fails. */
+  const drift = spawnSync(process.execPath, ["scripts/gen-setup-manifest.mjs", "--check"], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+  });
+  record(
+    "the generated module the server reads matches the manifest",
+    drift.status === 0,
+    (drift.stderr || drift.stdout || "").trim().split("\n")[0],
   );
   record(
     "every skill the manifest requires names the files that prove it",

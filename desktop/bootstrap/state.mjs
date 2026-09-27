@@ -245,8 +245,19 @@ export function defaultSkillDir(dataDir, skill) {
  * checkout's own vendored copy is the right answer.
  */
 export function bundledSkillDir(resources, skill) {
-  if (resources) return path.join(resources, "server", "vendor", skill.id);
-  return path.join(process.cwd(), "vendor", skill.id);
+  const candidates = resources
+    ? [
+        // The packaged layout: the standalone server is staged under resources.
+        path.join(resources, "server", "vendor", skill.id),
+        // A caller that passed a repository root rather than a resources dir.
+        path.join(resources, "vendor", skill.id),
+      ]
+    : [path.join(process.cwd(), "vendor", skill.id)];
+  // The first that looks like the catalogue wins; otherwise the first, so the
+  // caller gets a path to report rather than null.
+  return (
+    candidates.find((dir) => readableFile(path.join(dir, "scripts", "search.py"))) ?? candidates[0]
+  );
 }
 
 /**

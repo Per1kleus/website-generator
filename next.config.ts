@@ -16,6 +16,43 @@ const nextConfig: NextConfig = {
   outputFileTracingIncludes: {
     "/api/**": ["./vendor/ui-ux-pro-max/**"],
   },
+  /**
+   * What the standalone server must NOT carry.
+   *
+   * Tracing from the repository root is what makes the native modules and the
+   * vendored catalogue resolve correctly, and the cost is that everything else
+   * at the root is a candidate too. `desktop/` is the one that matters: it
+   * holds the Rust build directory, so a second packaging run traced the
+   * previous run's output and the standalone server grew to 7.5 GB — of which
+   * 7.1 GB was a build cache the server has no use for.
+   *
+   * None of these are needed at runtime. The desktop shell, the first-launch
+   * bootstrap and the sidecar launcher are shipped as their own Tauri
+   * resources, beside the server rather than inside it.
+   */
+  outputFileTracingExcludes: {
+    "*": [
+      "desktop/**",
+      "docs/**",
+      "mobile/**",
+      "qa-screenshots/**",
+      "scripts/**",
+      "data/**",
+      ".next/standalone/**",
+      "**/*.md",
+      "*.txt",
+      // The click-to-run installers belong beside the source, not inside the
+      // server they install.
+      "install.sh",
+      "install-windows.cmd",
+      "start.sh",
+      /* The manifest is read by the first-launch bootstrap, which is shipped
+         beside this server rather than inside it, and the server itself reads
+         the generated module. A second copy in here would be a file nothing
+         reads and somebody eventually edits. */
+      "setup-manifest.json",
+    ],
+  },
   // Trace from the repo root so the standalone bundle resolves the native
   // modules and the vendored catalogue correctly.
   outputFileTracingRoot: process.cwd(),

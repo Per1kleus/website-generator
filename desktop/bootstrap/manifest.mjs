@@ -1,22 +1,48 @@
 /**
  * The setup manifest, and the questions asked of it.
  *
- * `manifest.json` is the data; this is the only place that interprets it. Both
- * exist so that "what does a working installation consist of?" has exactly one
- * answer, rather than one answer per file that happens to need it.
+ * `setup-manifest.json` is the data; this is the only place that interprets it.
+ * Both exist so that "what does a working installation consist of?" has exactly
+ * one answer, rather than one answer per file that happens to need it.
  *
  * Read from disk rather than imported as a JSON module so the same file works
- * under every Node version this application has shipped with, and so a
- * packaged build can be inspected — and, if it ever has to be, corrected —
- * without rebuilding anything.
+ * under every Node version this application has shipped with, and so a packaged
+ * build can be inspected — and, if it ever has to be, corrected — without
+ * rebuilding anything.
+ *
+ * It sits at the repository root rather than beside this file, and that is not
+ * cosmetic: the running server imports it too, and Next's output tracing
+ * follows an import outside `src/` by carrying its directory into the
+ * standalone build. With the manifest under `desktop/`, that swept the Rust
+ * build directory into the bundle and produced a 7.5 GB server. At the root it
+ * is one file with nothing around it to sweep.
  */
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
-export const MANIFEST = JSON.parse(readFileSync(path.join(here, "manifest.json"), "utf8"));
+/**
+ * Two layouts, one file.
+ *
+ *   repository   <root>/setup-manifest.json, two levels up from here
+ *   packaged     <resources>/setup-manifest.json, one level up from
+ *                <resources>/bootstrap/
+ */
+function manifestPath() {
+  const candidates = [
+    path.join(here, "..", "..", "setup-manifest.json"),
+    path.join(here, "..", "setup-manifest.json"),
+  ];
+  const found = candidates.find((file) => existsSync(file));
+  if (!found) {
+    throw new Error("setup-manifest.json is missing. The installation is incomplete.");
+  }
+  return found;
+}
+
+export const MANIFEST = JSON.parse(readFileSync(manifestPath(), "utf8"));
 
 /** Bump `revision` in the manifest to make every installation re-provision. */
 export const BOOTSTRAP_REVISION = MANIFEST.revision;
