@@ -9,6 +9,7 @@ import { availability, isPlatform, providerFor } from "@/server/providers";
 import { checkPublishable } from "@/server/publish-gate";
 import { connectionStatus as githubStatus } from "@/server/github/oauth";
 import { connectDomain, disconnectDomain, refreshDomain, publicView } from "@/server/deploy-view";
+import { selfOrigin } from "@/server/runtime";
 
 /**
  * Publishing, and everything about where a website is published.
@@ -136,7 +137,13 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     project.site,
     platform,
     body.slug ?? "",
-    new URL(req.url).origin,
+    /* The address this server is actually reachable at.
+       `req.url` is the obvious answer and the wrong one: behind a proxy it is
+       the internal origin, and in a standalone server bound to 0.0.0.0 it is
+       literally "http://0.0.0.0:3000" — which then becomes the published
+       website's own base URL. `selfOrigin` prefers what the operator or the
+       desktop launcher established and falls back to the request. */
+    selfOrigin(new URL(req.url).origin),
     user.id,
     // Which saved version is going public. The version history itself is
     // untouched — this only records which of its entries is the live one.
